@@ -1,0 +1,11 @@
+{
+  "zone": "koramangala",
+  "stops": [
+    { "id": "stop-1", "place_id": "tower-4", "label": "Tower 4, Sunrise Apartments", "lat": 12.9352, "lon": 77.6146, "seq": 1 },
+    { "id": "stop-2", "place_id": "green-residency", "label": "Green Residency, Block B", "lat": 12.9339, "lon": 77.6178, "seq": 2 },
+    { "id": "stop-3", "place_id": "cafe-brew", "label": "Cafe Brew, 80 Feet Road", "lat": 12.9366, "lon": 77.6122, "seq": 3 },
+    { "id": "stop-4", "place_id": "lakeview-society", "label": "Lakeview Society, Gate 2", "lat": 12.9318, "lon": 77.6205, "seq": 4 },
+    { "id": "stop-5", "place_id": "silver-oak", "label": "Silver Oak Apartments", "lat": 12.9384, "lon": 77.6091, "seq": 5 },
+    { "id": "stop-6", "place_id": "maple-heights", "label": "Maple Heights, Tower C", "lat": 12.9301, "lon": 77.6163, "seq": 6 }
+  ]
+}

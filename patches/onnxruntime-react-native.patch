@@ -1,0 +1,16 @@
+diff --git a/android/build.gradle b/android/build.gradle
+index 41b43599a9af6ef1c170047d39db1f3baa6ca682..df4a36877ebf885a8f82597e6cd49fa2f59aab8a 100644
+--- a/android/build.gradle
++++ b/android/build.gradle
+@@ -247,10 +247,7 @@ dependencies {
+     extractLibs "com.microsoft.onnxruntime:onnxruntime-android:latest.integration@aar"
+   }
+ 
+-  if (VersionNumber.parse(REACT_NATIVE_VERSION) < VersionNumber.parse("0.71")) {
+-    extractLibs "com.facebook.fbjni:fbjni:+:headers"
+-    extractLibs "com.facebook.fbjni:fbjni:+"
+-  }
++  // Removed: VersionNumber was dropped in Gradle 9 and this branch only applied to RN < 0.71.
+ 
+   // By default it will just include onnxruntime full aar package
+   if (ortExtensionsEnabled) {

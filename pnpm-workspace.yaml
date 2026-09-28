@@ -1,0 +1,22 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+  - 'tools'
+
+allowBuilds:
+  react-native-qdrant-edge: false
+  # the server's native modules need their install scripts (prebuilt binary download / build)
+  better-sqlite3: true
+  onnxruntime-node: true
+  esbuild: true # used by tsx; its script only verifies the platform binary
+  unrs-resolver: true # native resolver for eslint-import-resolver-typescript; its script only downloads the platform binary
+
+minimumReleaseAgeExclude:
+  - '@tanstack/query-core@5.104.0'
+  - '@tanstack/react-query@5.104.0'
+
+# Metro / React Native need a flat node_modules
+nodeLinker: hoisted
+
+patchedDependencies:
+  onnxruntime-react-native: patches/onnxruntime-react-native.patch

@@ -1,0 +1,52 @@
+@import 'tailwindcss';
+
+/* LastMeter design system (README_NEW.md §12): deep forest green as the single accent ("lime" token, kept
+   for compatibility with existing utility classes), warm mustard/orange for status, soft grey canvas, square
+   corners. Same values as apps/mobile/src/ui/theme.ts so the dashboard and phone read as one brand. */
+@theme {
+  --color-lime: #1e5a45;
+  --color-lime-dark: #174636;
+  --color-lime-soft: #dcefe6;
+  --color-ink: #1c1f1e;
+  --color-peach: #f2683a;
+  --color-cream: #f4f5f2;
+  --color-cream-alt: #edeeea;
+  --color-sand: #fce9a8;
+  --color-sand-dark: #f4c542;
+  --color-gold: #f4c542;
+  --color-warm-black: #1c1f1e;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f0f1ed;
+  --color-muted: rgba(28, 31, 30, 0.62);
+  --color-faint: rgba(28, 31, 30, 0.42);
+  --color-line: #e4e7e3;
+  --color-line-strong: rgba(28, 31, 30, 0.2);
+
+  --color-ok: #1e5a45;
+  --color-ok-bg: #dcefe6;
+  --color-warn: #8a6a00;
+  --color-warn-bg: #fce9a8;
+  --color-bad: #f2683a;
+  --color-bad-bg: #fde2d6;
+
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, 'SF Mono', monospace;
+  --font-serif: var(--font-instrument), Georgia, serif;
+}
+
+html,
+body {
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* sharp corners are a brand rule */
+* {
+  border-radius: 0 !important;
+}
+
+::selection {
+  background: var(--color-sand-dark);
+  color: var(--color-ink);
+}
