@@ -86,7 +86,7 @@ export default function MemoryScreen() {
 
           <SectionTitle>Memory Map</SectionTitle>
           <Card>
-            <Sub>Themes found automatically across everything stored here — nothing is tagged by hand, and this never leaves the phone.</Sub>
+            <Sub>Themes found automatically across everything stored here. Nothing is tagged by hand, and this never leaves the phone.</Sub>
             {clusters.data?.length ? (
               <Row style={{ flexWrap: 'wrap' }}>
                 {clusters.data.map((c, i) => (
@@ -101,7 +101,7 @@ export default function MemoryScreen() {
       ) : (
         <>
           <Card>
-            <T weight="700">Zone pack — knowledge from other riders</T>
+            <T weight="700">Zone pack: knowledge from other riders</T>
             <Row style={{ flexWrap: 'wrap' }}>
               {Object.entries(o?.crowd.byKind ?? {}).map(([k, n]) => <Chip key={k} tone="good" label={`${k.replace('_', ' ')} · ${n}`} />)}
             </Row>

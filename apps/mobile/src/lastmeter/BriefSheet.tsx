@@ -27,7 +27,7 @@ export function BriefSheet({ visible, label, lines, onClose }: { visible: boolea
           </Row>
         ))
       ) : (
-        <Sub>Nobody's left a note about this stop yet. You'll be the first — whatever you find here helps the next rider.</Sub>
+        <Sub>Nobody's left a note about this stop yet. You'll be the first, and whatever you find here helps the next rider.</Sub>
       )}
       <Row style={{ flexWrap: 'wrap', marginTop: 4 }}>
         <Chip small label="Works offline" tone="good" />

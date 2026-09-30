@@ -68,6 +68,51 @@ export const DEMO_VISITS: DemoVisit[] = [
   },
 ];
 
+export interface DoctorProfile {
+  id: string;
+  name: string;
+  specialty: string;
+  clinic: string;
+  qualifications: string;
+  experience: string;
+  rating: string;
+  reviews: number;
+  about: string;
+  /** Mock Practo-style listing; a real build would look the doctor up in a directory. */
+  profileUrl: string;
+  /** Demo visits this doctor can be "recorded" for. */
+  demoIds: string[];
+}
+
+export const DOCTORS: DoctorProfile[] = [
+  {
+    id: 'dr-mehta',
+    name: 'Dr. Anil Mehta',
+    specialty: 'Cardiologist',
+    clinic: 'Apollo Clinic, Indiranagar',
+    qualifications: 'MBBS, MD, DM (Cardiology)',
+    experience: '18 yrs experience',
+    rating: '4.8',
+    reviews: 1240,
+    about: 'Hypertension, cholesterol and preventive heart care.',
+    profileUrl: 'practo.com/bangalore/doctor/anil-mehta',
+    demoIds: ['demo-mehta-1', 'demo-mehta-2'],
+  },
+  {
+    id: 'dr-rao',
+    name: 'Dr. Sneha Rao',
+    specialty: 'Orthopaedic',
+    clinic: 'Sakra Hospital, Bellandur',
+    qualifications: 'MBBS, MS (Orthopaedics)',
+    experience: '11 yrs experience',
+    rating: '4.6',
+    reviews: 692,
+    about: 'Knee and joint pain, arthritis and physiotherapy plans.',
+    profileUrl: 'practo.com/bangalore/doctor/sneha-rao',
+    demoIds: ['demo-rao-1'],
+  },
+];
+
 export const visitTs = (daysAgo: number) => Date.now() - daysAgo * DAY;
 
 export interface Drug {

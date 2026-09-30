@@ -6,11 +6,11 @@ import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useApp } from '@/app-state/store';
 import { initCore } from '@/core';
-import { getSetting } from '@/core/db';
 import { initPrivacy } from '@/privacy';
 import { startSyncTriggers } from '@/sync';
 import { FONT_ASSETS } from '@/ui/fonts';
@@ -32,7 +32,8 @@ export default function RootLayout() {
       try {
         await initCore();
         initPrivacy();
-        set({ ready: true, onboarded: (await getSetting('onboarded', '0')) === '1' });
+        // Demo build: every cold start begins on the onboarding, whatever was saved last run.
+        set({ ready: true, onboarded: false });
       } catch (e) {
         console.warn('startup failed', e);
         set({ ready: true });
@@ -68,30 +69,35 @@ export default function RootLayout() {
 
   const navTheme = {
     ...DefaultTheme,
-    colors: { ...DefaultTheme.colors, background: t.bg, card: t.bg, text: t.dark, border: t.border, primary: t.accentDark },
+    colors: { ...DefaultTheme.colors, background: t.bg, card: t.wash, text: t.dark, border: t.border, primary: t.accentDark },
   };
 
   return (
-    <SafeAreaProvider>
-      <ThemeProvider value={navTheme}>
-        <StatusBar style="dark" />
-        <Stack
-          screenOptions={{
-            headerShadowVisible: false,
-            headerStyle: { backgroundColor: t.bg },
-            headerTintColor: t.dark,
-            headerTitleStyle: { fontFamily: 'Geist-Bold', fontSize: 18 },
-            contentStyle: { backgroundColor: t.bg },
-          }}>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
-          <Stack.Screen name="privacy" options={{ title: 'The Ledger' }} />
-          <Stack.Screen name="settings" options={{ title: 'Settings' }} />
-          <Stack.Screen name="diagnostics" options={{ title: 'Diagnostics' }} />
-          <Stack.Screen name="dev" options={{ title: 'Developer tests' }} />
-        </Stack>
-        <ToastHost />
-      </ThemeProvider>
-    </SafeAreaProvider>
+    // Android forces edge-to-edge display, which stops the OS from resizing the window for the keyboard —
+    // KeyboardProvider (react-native-keyboard-controller) is what makes Screen/Sheet's KeyboardAvoidingView
+    // actually track the keyboard there, the same way it always has on iOS.
+    <KeyboardProvider>
+      <SafeAreaProvider>
+        <ThemeProvider value={navTheme}>
+          <StatusBar style="dark" />
+          <Stack
+            screenOptions={{
+              headerShadowVisible: false,
+              headerStyle: { backgroundColor: t.wash },
+              headerTintColor: t.dark,
+              headerTitleStyle: { fontFamily: 'Geist-Bold', fontSize: 18 },
+              contentStyle: { backgroundColor: t.bg },
+            }}>
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
+            <Stack.Screen name="privacy" options={{ title: 'The Ledger' }} />
+            <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+            <Stack.Screen name="diagnostics" options={{ title: 'Diagnostics' }} />
+            <Stack.Screen name="dev" options={{ title: 'Developer tests' }} />
+          </Stack>
+          <ToastHost />
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </KeyboardProvider>
   );
 }

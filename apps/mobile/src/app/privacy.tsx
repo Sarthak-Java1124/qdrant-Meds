@@ -106,7 +106,7 @@ export default function PrivacyScreen() {
         )}
         <Sub>
           {d?.identity
-            ? 'A random id and a random token, generated on this phone. No name, no email, no phone number — ever.'
+            ? 'A random id and a random token, generated on this phone. No name, no email, no phone number, ever.'
             : 'Generated the moment this phone first talks to the server. Sync once online to see it.'}
         </Sub>
       </Card>
@@ -122,7 +122,7 @@ export default function PrivacyScreen() {
         {d && d.receipts.length > 0 ? (
           <>
             <Divider />
-            <Sub>Don't take our word for it — tamper with your own record and watch the check catch it.</Sub>
+            <Sub>Don't take our word for it. Tamper with your own record and watch the check catch it.</Sub>
             <View style={{ alignItems: 'flex-start' }}>
               <Button small kind="ghost" title="Prove it to yourself" onPress={() => setTamperOpen(true)} />
             </View>
@@ -173,7 +173,7 @@ export default function PrivacyScreen() {
       </Card>
 
       <Sheet visible={tamperOpen} title="Prove it to yourself" onClose={() => setTamperOpen(false)}>
-        <Sub>Pick a receipt below. We'll quietly edit it — the way a compromised server or a bug might — without recomputing its hash. Then close this, tap "Verify integrity" and watch it name the exact one.</Sub>
+        <Sub>Pick a receipt below. We'll quietly edit it, the way a compromised server or a bug might, without recomputing its hash. Then close this, tap "Verify integrity" and watch it name the exact one.</Sub>
         {d?.receipts.map((r) => (
           <Button
             key={r.id}

@@ -1,20 +1,22 @@
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Pressable, View } from 'react-native';
 
 import { AddVisitSheet, type AddMode } from '@/aftercare/AddVisit';
 import { CATEGORY_LABEL, type Category } from '@/aftercare/data';
 import { listAlerts, listVisits, memoryStats, resetAftercare, warmCategories, type Alert, type SaveSummary, type VisitRow } from '@/aftercare/engine';
+import { AnimatedCounter } from '@/ui/AnimatedCounter';
 import { HeaderActions } from '@/ui/HeaderActions';
 import { Button, Card, Chip, Icon, Row, Screen, SectionTitle, Sheet, Sub, T, type IconName } from '@/ui/kit';
 import { fmtDate } from '@/ui/format';
 import { useLoad } from '@/ui/hooks';
-import { glow, radius, raisedShadow, space, useTheme } from '@/ui/theme';
+import { SpringIn } from '@/ui/SpringIn';
+import { cardShadow, pastel, radius, raisedShadow, space, useTheme } from '@/ui/theme';
 import { toast } from '@/ui/toast';
 
 const SOURCE_LABEL = { recording: 'Recorded', prescription: 'Scanned', typed: 'Typed' } as const;
 const CAT_TONE: Partial<Record<Category, 'good' | 'warn' | 'bad'>> = { medicine: 'good', warning: 'bad', test: 'warn', follow_up: 'warn' };
-const AVATAR_TINTS = ['#EAFFD9', '#F0F0EC', '#C9FF99', '#E6E6E1'];
+const AVATAR_TINTS = [pastel.skySoft, pastel.mintSoft, pastel.pinkSoft, '#F1E9E1'];
 
 const initials = (name: string) =>
   name
@@ -29,21 +31,20 @@ function Avatar({ name, size = 48, light }: { name: string; size?: number; light
   const t = useTheme();
   const tint = AVATAR_TINTS[name.length % AVATAR_TINTS.length];
   return (
-    <View style={{ width: size, height: size, borderRadius: radius.pill, backgroundColor: light ? t.primary : tint, alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{ width: size, height: size, borderRadius: radius.pill, backgroundColor: light ? pastel.mint : tint, alignItems: 'center', justifyContent: 'center' }}>
       <T weight="700" size={size * 0.34} style={{ color: t.dark }}>{initials(name)}</T>
     </View>
   );
 }
 
-type RoundTone = 'light' | 'onDark' | 'onYellow' | 'yellow';
+type RoundTone = 'light' | 'onDark' | 'sky';
 
 function RoundIcon({ name, tone = 'light', size = 36 }: { name: IconName; tone?: RoundTone; size?: number }) {
   const t = useTheme();
   const c = {
     light: { bg: t.surfaceAlt, fg: t.dark },
     onDark: { bg: 'rgba(255,255,255,0.14)', fg: '#FFFFFF' },
-    onYellow: { bg: 'rgba(0,0,0,0.08)', fg: t.dark },
-    yellow: { bg: t.primary, fg: t.dark },
+    sky: { bg: t.primary, fg: t.dark },
   }[tone];
   return (
     <View style={{ width: size, height: size, borderRadius: radius.pill, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center' }}>
@@ -52,30 +53,103 @@ function RoundIcon({ name, tone = 'light', size = 36 }: { name: IconName; tone?:
   );
 }
 
-/** One tile of the 2×2 "add a visit" grid, modelled on the mockup's visit-type cards. */
-function ActionTile({ icon, title, hint, onPress, featured }: { icon: IconName; title: string; hint: string; onPress: () => void; featured?: boolean }) {
+/** A round play-style button: sky on light surfaces, white on the sky card. `pulsing` breathes a soft ring
+ *  outward behind it on a loop — the "tap to talk" cue on the featured record action. */
+function PlayDot({ icon, tone = 'sky', size = 34, pulsing }: { icon: IconName; tone?: 'sky' | 'white'; size?: number; pulsing?: boolean }) {
   const t = useTheme();
+  const ring = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!pulsing) return;
+    const loop = Animated.loop(Animated.timing(ring, { toValue: 1, duration: 1600, useNativeDriver: true }));
+    loop.start();
+    return () => loop.stop();
+  }, [pulsing, ring]);
+
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.85 : 1 }]}>
-      <View style={[{ backgroundColor: featured ? t.primary : t.card, borderRadius: radius.l, padding: space.m, gap: space.l, minHeight: 132 }, featured ? glow : null]}>
-        <Row style={{ justifyContent: 'space-between' }}>
-          <RoundIcon name={icon} tone={featured ? 'onYellow' : 'light'} />
-          <RoundIcon name="arrow-up-right" tone={featured ? 'onYellow' : 'light'} size={30} />
-        </Row>
-        <View style={{ gap: 2 }}>
-          <T weight="700" size={15} style={{ color: t.dark }}>{title}</T>
-          <T size={11} style={{ color: featured ? 'rgba(0,0,0,0.6)' : t.sub }}>{hint}</T>
-        </View>
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      {pulsing ? (
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            width: size,
+            height: size,
+            borderRadius: radius.pill,
+            backgroundColor: t.primary,
+            opacity: ring.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] }),
+            transform: [{ scale: ring.interpolate({ inputRange: [0, 1], outputRange: [1, 1.7] }) }],
+          }}
+        />
+      ) : null}
+      <View style={{ width: size, height: size, borderRadius: radius.pill, backgroundColor: tone === 'sky' ? t.primary : '#FFFFFF', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name={icon} size={size * 0.44} color={t.dark} />
       </View>
-    </Pressable>
+    </View>
   );
 }
 
+/** Press-in/out spring, shared by the tappable home-screen tiles — the same tactile feel as Card/Button. */
+function usePressScale() {
+  const scale = useRef(new Animated.Value(1)).current;
+  const pressIn = () => Animated.spring(scale, { toValue: 0.96, useNativeDriver: true, speed: 50, bounciness: 0 }).start();
+  const pressOut = () => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 8 }).start();
+  return { scale, pressIn, pressOut };
+}
+
+/** One of the two big side-by-side cards: title up top, a pill with hint + play dot at the bottom. `pulse`
+ *  marks the featured/primary one so its play dot breathes to draw the eye. */
+function HeroTile({ icon, title, hint, onPress, dark, pulse }: { icon: IconName; title: string; hint: string; onPress: () => void; dark?: boolean; pulse?: boolean }) {
+  const t = useTheme();
+  const { scale, pressIn, pressOut } = usePressScale();
+  return (
+    <Animated.View style={{ flex: 1, transform: [{ scale }] }}>
+      <Pressable onPress={onPress} onPressIn={pressIn} onPressOut={pressOut} style={{ flex: 1 }}>
+        <View style={[{ flex: 1, backgroundColor: dark ? t.dark : t.card, borderRadius: radius.l, padding: space.m, paddingTop: space.l, justifyContent: 'space-between', gap: space.xl, minHeight: 156 }, dark ? raisedShadow : cardShadow]}>
+          <T weight="600" size={21} track={-0.02} style={{ color: dark ? '#FFFFFF' : t.dark, lineHeight: 25 }}>{title}</T>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: dark ? t.darkRaised : t.surfaceAlt, borderRadius: radius.pill, paddingLeft: 12, padding: 4 }}>
+            <T size={11} weight="500" numberOfLines={1} style={{ flex: 1, color: dark ? 'rgba(255,255,255,0.85)' : t.sub }}>{hint}</T>
+            <PlayDot icon={icon} size={30} pulsing={pulse} />
+          </View>
+        </View>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+/** A full-width list card: title, small pill tags, round action on the right. */
+function ListTile({ icon, title, tags, onPress, filled }: { icon: IconName; title: string; tags: string[]; onPress: () => void; filled?: boolean }) {
+  const t = useTheme();
+  const { scale, pressIn, pressOut } = usePressScale();
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Pressable onPress={onPress} onPressIn={pressIn} onPressOut={pressOut}>
+        <View style={[{ backgroundColor: filled ? t.primary : t.card, borderRadius: radius.l, padding: space.l, flexDirection: 'row', alignItems: 'center', gap: space.m }, filled ? null : cardShadow]}>
+          <View style={{ flex: 1, gap: space.s }}>
+            <T weight="600" size={16} style={{ color: t.dark }}>{title}</T>
+            <Row style={{ gap: 6 }}>
+              {tags.map((tag) => (
+                <View key={tag} style={{ backgroundColor: filled ? 'rgba(255,255,255,0.75)' : t.surfaceAlt, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 }}>
+                  <T size={11} weight="500" style={{ color: t.dark }}>{tag}</T>
+                </View>
+              ))}
+            </Row>
+          </View>
+          <PlayDot icon={icon} tone={filled ? 'white' : 'sky'} size={40} />
+        </View>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+/** The home screen's hero card for the most recent visit. Tapping it expands the full transcript inline,
+ *  the same "tap a card to read everything" pattern as the visit rows further down the screen. */
 function LatestVisitCard({ v, moments }: { v: VisitRow | undefined; moments: number }) {
   const t = useTheme();
+  const [open, setOpen] = useState(false);
   const meds = v?.facts.filter((f) => f.med).length ?? 0;
-  return (
-    <View style={[{ backgroundColor: t.dark, borderRadius: radius.xl, padding: space.l, gap: space.m, overflow: 'hidden' }, raisedShadow]}>
+  const body = (
+    <>
       <View pointerEvents="none" style={{ position: 'absolute', width: 200, height: 200, borderRadius: 100, backgroundColor: 'rgba(255,255,255,0.05)', top: -80, right: -60 }} />
       {v ? (
         <>
@@ -85,20 +159,42 @@ function LatestVisitCard({ v, moments }: { v: VisitRow | undefined; moments: num
               <T weight="700" size={17} style={{ color: '#fff' }}>{v.doctor}</T>
               <T size={12} style={{ color: 'rgba(255,255,255,0.75)' }}>{`${v.specialty}${v.clinic ? ` · ${v.clinic}` : ''}`}</T>
             </View>
-            <RoundIcon name="arrow-up-right" tone="yellow" size={32} />
+            <RoundIcon name={open ? 'chevron-up' : 'chevron-down'} tone="sky" size={32} />
           </Row>
-          <View style={{ backgroundColor: 'rgba(255,255,255,0.14)', borderRadius: radius.m, padding: space.m, flexDirection: 'row', justifyContent: 'space-between' }}>
-            {[
-              { icon: 'calendar' as IconName, text: fmtDate(v.ts) },
-              { icon: 'plus-square' as IconName, text: `${meds} medicine${meds === 1 ? '' : 's'}` },
-              { icon: 'cpu' as IconName, text: `${moments} on-device` },
-            ].map((x) => (
-              <Row key={x.text} style={{ gap: 6 }}>
-                <Icon name={x.icon} size={13} color="#fff" />
-                <T size={12} weight="600" style={{ color: '#fff' }}>{x.text}</T>
-              </Row>
-            ))}
+          <View style={{ backgroundColor: t.darkRaised, borderRadius: radius.pill, paddingVertical: space.m, paddingHorizontal: space.l, flexDirection: 'row', justifyContent: 'space-between' }}>
+            <Row style={{ gap: 6 }}>
+              <Icon name="calendar" size={13} color="#fff" />
+              <T size={12} weight="600" style={{ color: '#fff' }}>{fmtDate(v.ts)}</T>
+            </Row>
+            <Row style={{ gap: 6 }}>
+              <Icon name="plus-square" size={13} color="#fff" />
+              <View style={{ flexDirection: 'row' }}>
+                <AnimatedCounter value={meds} size={12} weight="600" style={{ color: '#fff' }} />
+                <T size={12} weight="600" style={{ color: '#fff' }}>{meds === 1 ? ' medicine' : ' medicines'}</T>
+              </View>
+            </Row>
+            <Row style={{ gap: 6 }}>
+              <Icon name="cpu" size={13} color="#fff" />
+              <View style={{ flexDirection: 'row' }}>
+                <AnimatedCounter value={moments} size={12} weight="600" style={{ color: '#fff' }} />
+                <T size={12} weight="600" style={{ color: '#fff' }}> on-device</T>
+              </View>
+            </Row>
           </View>
+          {open ? (
+            <View style={{ gap: space.s }}>
+              {v.facts.map((f, i) => (
+                <Row key={i} style={{ alignItems: 'flex-start' }}>
+                  <T size={10} weight="700" style={{ width: 64, paddingTop: 2, color: f.speaker === 'Patient' ? t.primary : 'rgba(255,255,255,0.55)' }}>
+                    {f.speaker === 'Patient' ? 'You' : CATEGORY_LABEL[f.category]}
+                  </T>
+                  <T size={13} style={{ flex: 1, lineHeight: 18, color: '#fff' }}>{f.text}</T>
+                </Row>
+              ))}
+            </View>
+          ) : (
+            <T size={11} style={{ color: 'rgba(255,255,255,0.55)' }}>{`${v.facts.length} moments · tap to read`}</T>
+          )}
         </>
       ) : (
         <View style={{ gap: 6 }}>
@@ -106,7 +202,15 @@ function LatestVisitCard({ v, moments }: { v: VisitRow | undefined; moments: num
           <T size={13} style={{ color: 'rgba(255,255,255,0.8)' }}>Record your next appointment. It is understood and stored on this phone, even with no internet.</T>
         </View>
       )}
-    </View>
+    </>
+  );
+  const style = [{ backgroundColor: t.dark, borderRadius: radius.xl, padding: space.l, gap: space.m, overflow: 'hidden' as const }, raisedShadow];
+  return v ? (
+    <Pressable onPress={() => setOpen((o) => !o)} style={({ pressed }) => [...style, pressed && { opacity: 0.92 }]}>
+      {body}
+    </Pressable>
+  ) : (
+    <View style={style}>{body}</View>
   );
 }
 
@@ -144,7 +248,7 @@ function VisitCard({ v }: { v: VisitRow }) {
           <Sub>{v.specialty}</Sub>
         </View>
         <View style={{ alignItems: 'flex-end', gap: 4 }}>
-          <View style={{ backgroundColor: t.primarySoft, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 }}>
+          <View style={{ backgroundColor: t.primary, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 }}>
             <T size={11} weight="700" style={{ color: t.dark }}>{fmtDate(v.ts)}</T>
           </View>
           <T size={10} color="faint">{SOURCE_LABEL[v.source]}</T>
@@ -207,38 +311,70 @@ export default function VisitsScreen() {
 
   return (
     <Screen top>
-      <Row style={{ justifyContent: 'space-between', paddingTop: space.s }}>
-        <T size={14} color="sub">{greeting()}</T>
-        <HeaderActions />
-      </Row>
-      <T size={30} weight="700" track={-0.03} style={{ marginTop: -space.s }}>Your health memory</T>
+      <SpringIn style={{ gap: space.m }}>
+        <Row style={{ justifyContent: 'flex-end', paddingTop: space.s, marginRight: -space.m }}>
+          <HeaderActions />
+        </Row>
+        <T size={32} weight="700" track={-0.03}>{`${greeting()} 👋`}</T>
+      </SpringIn>
 
-      <SectionTitle right={<T size={12} weight="600" color="primary">{`${s.visits} visit${s.visits === 1 ? '' : 's'}`}</T>}>Latest visit</SectionTitle>
-      <LatestVisitCard v={list[0]} moments={s.moments} />
+      <SpringIn delay={60}>
+        <Pressable onPress={() => router.navigate('/ask')} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
+          <Row style={{ backgroundColor: t.card, borderRadius: radius.pill, paddingHorizontal: space.l, paddingVertical: 14, gap: space.m, ...cardShadow }}>
+            <Icon name="search" size={17} color={t.dark} />
+            <T size={14} color="faint">Search your visits…</T>
+          </Row>
+        </Pressable>
+      </SpringIn>
+
+      <SpringIn delay={120}>
+        <Row style={{ gap: space.m, alignItems: 'stretch', marginTop: space.xs }}>
+          <HeroTile dark pulse icon="mic" title={'Record\nvisit'} hint="Speech → memory" onPress={() => setMode('record')} />
+          <HeroTile icon="camera" title={'Scan\nprescription'} hint="Photo → medicines" onPress={() => setMode('scan')} />
+        </Row>
+      </SpringIn>
+
+      <SpringIn delay={180} style={{ gap: space.m }}>
+        <SectionTitle right={<T size={12} weight="500" color="sub">Works offline</T>}>More ways to add</SectionTitle>
+        <View style={{ gap: space.m }}>
+          <ListTile filled icon="edit-3" title="Type your notes" tags={['Typed', 'Any visit']} onPress={() => setMode('type')} />
+          <ListTile icon="message-circle" title="Ask your memory" tags={['On-device', 'Offline']} onPress={() => router.navigate('/ask')} />
+        </View>
+      </SpringIn>
+
+      <SpringIn delay={240} style={{ gap: space.m }}>
+        <SectionTitle
+          right={
+            <Row style={{ gap: 0 }}>
+              <AnimatedCounter value={s.visits} size={12} weight="500" color="sub" />
+              <T size={12} weight="500" color="sub">{s.visits === 1 ? ' visit' : ' visits'}</T>
+            </Row>
+          }>
+          Latest visit
+        </SectionTitle>
+        <LatestVisitCard v={list[0]} moments={s.moments} />
+      </SpringIn>
 
       {(alerts.data ?? []).map((a, i) => (
-        <AlertCard key={i} a={a} />
+        <SpringIn key={i} delay={280 + i * 40}>
+          <AlertCard a={a} />
+        </SpringIn>
       ))}
 
-      <SectionTitle
-        right={
-          <Pressable onPress={() => router.navigate('/ask')} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: t.card, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="search" size={16} />
-          </Pressable>
-        }>
-        Add a visit
-      </SectionTitle>
-      <Row style={{ gap: space.m, alignItems: 'stretch' }}>
-        <ActionTile featured icon="mic" title="Record visit" hint="Speech → memory" onPress={() => setMode('record')} />
-        <ActionTile icon="camera" title="Scan Rx" hint="Read a prescription" onPress={() => setMode('scan')} />
-      </Row>
-      <Row style={{ gap: space.m, alignItems: 'stretch' }}>
-        <ActionTile icon="edit-3" title="Type notes" hint="Paste what was said" onPress={() => setMode('type')} />
-        <ActionTile icon="message-circle" title="Ask memory" hint="Works offline" onPress={() => router.navigate('/ask')} />
-      </Row>
-
-      <SectionTitle right={s.pending ? <Chip small tone="warn" label={`${s.pending} to sync`} /> : undefined}>Your visits</SectionTitle>
-      {list.length === 0 ? <Sub>Visits you add show up here as a timeline.</Sub> : list.map((v) => <VisitCard key={v.id} v={v} />)}
+      <SpringIn delay={300}>
+        <SectionTitle right={s.pending ? <Chip small tone="warn" label={`${s.pending} to sync`} /> : undefined}>Your visits</SectionTitle>
+      </SpringIn>
+      {list.length === 0 ? (
+        <SpringIn delay={340}>
+          <Sub>Visits you add show up here as a timeline.</Sub>
+        </SpringIn>
+      ) : (
+        list.map((v, i) => (
+          <SpringIn key={v.id} delay={320 + Math.min(i, 4) * 40}>
+            <VisitCard v={v} />
+          </SpringIn>
+        ))
+      )}
 
       {list.length ? (
         <Button

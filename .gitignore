@@ -29,3 +29,8 @@ npm-debug.*
 *.jks
 *.keystore
 graphify-out/
+
+# local-only design mockups, pitch assets, demo script
+/type/
+/pitch/
+/DEMO_SCRIPT.md

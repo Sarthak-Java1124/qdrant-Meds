@@ -1,5 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
+import { View } from 'react-native';
 
 import { deleteEverything } from '@/app-state/deleteEverything';
 import { getZone, setZone } from '@/core/groups';
@@ -13,6 +14,7 @@ import { message } from '@/ui/format';
 import { useLoad } from '@/ui/hooks';
 import { Button, Card, Chip, Divider, Field, H2, Row, Screen, SectionTitle, Sheet, Sub, SwitchRow, T } from '@/ui/kit';
 import { ZonePicker } from '@/ui/pickers';
+import { space } from '@/ui/theme';
 import { toast } from '@/ui/toast';
 
 export default function SettingsScreen() {
@@ -88,9 +90,11 @@ export default function SettingsScreen() {
 
       <SectionTitle>Sync</SectionTitle>
       <Card>
-        <Row style={{ justifyContent: 'space-between' }}>
-          <T weight="600">{v?.lastSync ? `Last synced ${ago(Number(v.lastSync))}` : 'Not synced yet'}</T>
-          <Sub>{`${v?.pending ?? 0} waiting to send`}</Sub>
+        <Row style={{ justifyContent: 'space-between', gap: space.m }}>
+          <View style={{ flex: 1, gap: 2 }}>
+            <T weight="600" numberOfLines={1}>{v?.lastSync ? `Last synced ${ago(Number(v.lastSync))}` : 'Not synced yet'}</T>
+            <Sub>{`${v?.pending ?? 0} waiting to send`}</Sub>
+          </View>
           <Button small title="Sync now" busy={busy === 'sync'} onPress={() => run('sync', async () => { const r = await syncNow(); return r.skipped === 'offline' ? 'You are offline' : r.error ? `Sync failed: ${r.error.slice(0, 80)}` : `Sent ${r.pushed}, received ${r.pulled}`; })} />
         </Row>
         <Divider />

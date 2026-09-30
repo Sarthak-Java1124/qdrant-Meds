@@ -1,86 +1,242 @@
-import { useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { useRef, useState, type ReactNode } from 'react';
+import { ActivityIndicator, Platform, Pressable, ScrollView, TextInput, View } from 'react-native';
+// See ui/kit.tsx: React Native's own KeyboardAvoidingView doesn't track the keyboard on Android once
+// edge-to-edge display is on, so this screen (which builds its own layout instead of using Screen) needs the
+// same swap. Requires the app root to be wrapped in this library's KeyboardProvider (app/_layout.tsx).
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 
 import { CATEGORY_LABEL, type Category } from '@/aftercare/data';
 import { ask, type AskAnswer } from '@/aftercare/engine';
-import { Button, Card, Chip, Eyebrow, Field, Icon, Row, Screen, SectionTitle, Sub, T } from '@/ui/kit';
-import { space, useTheme } from '@/ui/theme';
+import { fontFamily } from '@/ui/fonts';
+import { Chip, Icon, Row, Sub, T } from '@/ui/kit';
+import { ThinkingDots } from '@/ui/ThinkingDots';
+import { cardShadow, radius, space, useTheme } from '@/ui/theme';
 import { toast } from '@/ui/toast';
 
 const SUGGESTED = ['When do I take Aspirin?', 'What is the blue tablet?', 'What should I avoid eating?', 'Which tests do I need?', 'When is my next checkup?', 'Can I take a painkiller?'];
 
+/**
+ * Expo's edge-to-edge display on Android (on by default) turns off `windowSoftInputMode=adjustResize`, so
+ * Android needs `KeyboardAvoidingView` too — same as iOS, just with the `behavior` that actually works there.
+ * `automaticOffset` asks the OS for this view's true on-screen position (it sits below the tab header) instead
+ * of assuming it starts at the top of the screen — without it the avoidance silently computes the wrong
+ * offset and never visibly moves anything.
+ */
+const KEYBOARD_BEHAVIOR = Platform.OS === 'ios' ? 'padding' : 'height';
+
+type NewMessage = { role: 'user'; text: string } | { role: 'assistant'; answer: AskAnswer } | { role: 'error'; text: string };
+type Message = NewMessage & { id: number };
+
+/** The assistant's small round mark, shown beside each reply. */
+function AssistantAvatar({ size = 28 }: { size?: number }) {
+  const t = useTheme();
+  return (
+    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: t.primary, alignItems: 'center', justifyContent: 'center' }}>
+      <Icon name="activity" size={size * 0.5} color={t.dark} />
+    </View>
+  );
+}
+
+function UserBubble({ text }: { text: string }) {
+  const t = useTheme();
+  return (
+    <View style={{ alignSelf: 'flex-end', maxWidth: '82%', backgroundColor: t.dark, borderRadius: radius.l, borderBottomRightRadius: 6, paddingHorizontal: space.l, paddingVertical: 11 }}>
+      <T size={15} style={{ color: '#FFFFFF', lineHeight: 21 }}>{text}</T>
+    </View>
+  );
+}
+
+/** A reply: plain text next to the avatar (no bubble, like Claude/ChatGPT), a meta line, and collapsible sources. */
+function AssistantReply({ a }: { a: AskAnswer }) {
+  const t = useTheme();
+  const [open, setOpen] = useState(false);
+  const n = a.hits.length;
+  return (
+    <Row style={{ alignItems: 'flex-start', gap: space.m }}>
+      <AssistantAvatar />
+      <View style={{ flex: 1, gap: space.s, paddingTop: 3 }}>
+        <T size={15} selectable style={{ lineHeight: 22 }}>{a.answer}</T>
+        <Row style={{ gap: space.s, flexWrap: 'wrap' }}>
+          <T size={11} color="faint">{`On this phone · ${a.ms} ms`}</T>
+          {n ? (
+            <Pressable onPress={() => setOpen((o) => !o)} hitSlop={6}>
+              <Row style={{ backgroundColor: t.surfaceAlt, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4, gap: 4 }}>
+                <Icon name="file-text" size={11} color={t.sub} />
+                <T size={11} weight="600" color="sub">{`${n} source${n === 1 ? '' : 's'}`}</T>
+                <Icon name={open ? 'chevron-up' : 'chevron-down'} size={12} color={t.sub} />
+              </Row>
+            </Pressable>
+          ) : null}
+        </Row>
+        {open ? (
+          <View style={{ gap: space.s }}>
+            {a.hits.map((h, i) => (
+              <View key={i} style={{ backgroundColor: t.card, borderRadius: radius.m, padding: space.m, gap: 6, borderWidth: 1, borderColor: t.border }}>
+                <T size={13} style={{ lineHeight: 18 }}>{`“${h.text}”`}</T>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Sub style={{ flex: 1, fontSize: 11 }}>{`${h.doctor} · ${h.specialty} · ${h.date}`}</Sub>
+                  {h.category ? <Chip small label={CATEGORY_LABEL[h.category as Category] ?? h.category} /> : null}
+                </Row>
+              </View>
+            ))}
+            <T size={11} color="faint">Found by meaning + exact drug names in the memory on this phone.</T>
+          </View>
+        ) : null}
+      </View>
+    </Row>
+  );
+}
+
+function Welcome() {
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.m, paddingHorizontal: space.xl }}>
+      <AssistantAvatar size={56} />
+      <T size={22} weight="600" track={-0.02} style={{ textAlign: 'center' }}>What would you like to know?</T>
+      <Sub style={{ textAlign: 'center', fontSize: 14, lineHeight: 20 }}>Ask about anything your doctors told you. Answers come from your visits, right on this phone, even offline.</Sub>
+    </View>
+  );
+}
+
+/**
+ * Collapsible suggestions: a small toggle pill; the list only shows once the user opens it.
+ * The panel is a direct child here (not nested inside a `flex: 1` row alongside the toggle) — that nesting
+ * previously left the row's width undetermined, which collapsed each suggestion's `flex: 1` label to zero
+ * width and hid the text entirely. `trailing` (the "New chat" pill) sits beside the toggle instead.
+ */
+function Suggestions({ open, onToggle, onPick, trailing }: { open: boolean; onToggle: () => void; onPick: (q: string) => void; trailing?: ReactNode }) {
+  const t = useTheme();
+  return (
+    <View style={{ gap: space.s }}>
+      {open ? (
+        <View style={{ backgroundColor: t.card, borderRadius: radius.l, paddingVertical: space.xs, ...cardShadow }}>
+          {SUGGESTED.map((s, i) => (
+            <Pressable key={s} onPress={() => onPick(s)} style={({ pressed }) => ({ backgroundColor: pressed ? t.surfaceAlt : 'transparent' })}>
+              <Row style={{ paddingHorizontal: space.l, paddingVertical: 12, gap: space.m, borderTopWidth: i ? 1 : 0, borderTopColor: t.border }}>
+                <Icon name="message-circle" size={15} color={t.sub} />
+                <T size={14} style={{ flex: 1 }}>{s}</T>
+                <Icon name="arrow-up-right" size={15} color={t.faint} />
+              </Row>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+      <Row style={{ justifyContent: 'space-between' }}>
+        <Pressable onPress={onToggle} hitSlop={6}>
+          <Row style={{ backgroundColor: open ? t.primary : t.card, borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 8, gap: 6, ...(open ? null : cardShadow) }}>
+            <Icon name="zap" size={13} color={t.dark} />
+            <T size={12} weight="600">Suggestions</T>
+            <Icon name={open ? 'chevron-down' : 'chevron-up'} size={14} color={t.dark} />
+          </Row>
+        </Pressable>
+        {open ? null : trailing}
+      </Row>
+    </View>
+  );
+}
+
 export default function AskScreen() {
   const t = useTheme();
+  const scroll = useRef<ScrollView>(null);
+  const nextId = useRef(0);
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
-  const [res, setRes] = useState<AskAnswer | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const push = (m: NewMessage) => setMessages((ms) => [...ms, { ...m, id: nextId.current++ }]);
 
   const run = async (question: string) => {
-    if (!question.trim()) return;
-    setQ(question);
+    const text = question.trim();
+    if (!text || busy) return;
+    setQ('');
+    setShowSuggestions(false);
+    push({ role: 'user', text });
     setBusy(true);
     try {
-      setRes(await ask(question));
+      push({ role: 'assistant', answer: await ask(text) });
     } catch (e) {
-      toast(e instanceof Error ? e.message : String(e), 'bad');
+      push({ role: 'error', text: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(false);
     }
   };
 
-  const toneBg = res ? { good: t.goodSoft, warn: t.warnSoft, bad: t.badSoft, soft: t.primarySoft }[res.tone] : t.card;
+  const canSend = !!q.trim() && !busy;
 
   return (
-    <Screen>
-      <Row style={{ alignItems: 'flex-end' }}>
-        <View style={{ flex: 1 }}>
-          <Field placeholder="Ask anything the doctor told you…" value={q} onChangeText={setQ} onSubmitEditing={() => run(q)} returnKeyType="search" />
-        </View>
-        <Pressable
-          onPress={() => toast('Voice questions arrive with on-device Whisper (roadmap)', 'warn')}
-          style={({ pressed }) => ({ width: 52, height: 52, borderRadius: 26, backgroundColor: t.dark, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.8 : 1 })}>
-          <Icon name="mic" size={20} color={t.primary} />
-        </Pressable>
-      </Row>
-      <Button title="Ask" busy={busy} onPress={() => run(q)} />
-      <Row style={{ flexWrap: 'wrap' }}>
-        {SUGGESTED.map((s) => (
-          <Chip key={s} small label={s} onPress={() => run(s)} />
-        ))}
-      </Row>
-
-      {res ? (
-        <>
-          <View style={{ backgroundColor: toneBg, borderRadius: 16, padding: space.l, gap: space.s }}>
-            <Row>
-              <Icon name="cpu" size={14} color={t.dark} />
-              <Eyebrow>{`Answered on this phone · ${res.ms} ms · works offline`}</Eyebrow>
-            </Row>
-            <T size={16} weight="600" style={{ lineHeight: 22 }}>{res.answer}</T>
-            <Sub>{`Summary written on-device from ${res.hits.length} matching moment${res.hits.length === 1 ? '' : 's'} in your visits.`}</Sub>
-          </View>
-
-          <SectionTitle icon="search">From your visits</SectionTitle>
-          {res.hits.map((h, i) => (
-            <Card key={i}>
-              <T size={14}>{`“${h.text}”`}</T>
-              <Row style={{ justifyContent: 'space-between' }}>
-                <Sub>{`${h.doctor} · ${h.specialty} · ${h.date}`}</Sub>
-                <Row>
-                  {h.category ? <Chip small label={CATEGORY_LABEL[h.category as Category] ?? h.category} /> : null}
-                  <T mono size={10} color="faint">{h.score.toFixed(2)}</T>
-                </Row>
-              </Row>
-            </Card>
-          ))}
-          <Sub>Hybrid search: MiniLM meaning vectors + exact drug-name keywords, fused, over the Qdrant Edge memory on this phone.</Sub>
-        </>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={KEYBOARD_BEHAVIOR} automaticOffset>
+      {messages.length === 0 && !busy ? (
+        <Welcome />
       ) : (
-        <Card>
-          <T weight="600">Your visits, answerable offline</T>
-          <Sub>Every sentence the doctor said is stored as a vector on this phone. Ask in your own words, even in airplane mode.</Sub>
-        </Card>
+        <ScrollView
+          ref={scroll}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: space.l, gap: space.xl }}
+          keyboardShouldPersistTaps="handled"
+          onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}>
+          {messages.map((m) =>
+            m.role === 'user' ? (
+              <UserBubble key={m.id} text={m.text} />
+            ) : m.role === 'assistant' ? (
+              <AssistantReply key={m.id} a={m.answer} />
+            ) : (
+              <Row key={m.id} style={{ alignItems: 'flex-start', gap: space.m }}>
+                <AssistantAvatar />
+                <T size={14} color="bad" style={{ flex: 1, paddingTop: 5 }}>{`Something went wrong: ${m.text}`}</T>
+              </Row>
+            ),
+          )}
+          {busy ? (
+            <Row style={{ alignItems: 'flex-start', gap: space.m }}>
+              <AssistantAvatar />
+              <ThinkingDots />
+            </Row>
+          ) : null}
+        </ScrollView>
       )}
-    </Screen>
+
+      <View style={{ paddingHorizontal: space.l, paddingTop: space.s, paddingBottom: space.m, gap: space.s }}>
+        <Suggestions
+          open={showSuggestions}
+          onToggle={() => setShowSuggestions((o) => !o)}
+          onPick={run}
+          trailing={
+            messages.length > 0 ? (
+              <Pressable onPress={() => setMessages([])} disabled={busy} hitSlop={6}>
+                <Row style={{ backgroundColor: t.card, borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 8, gap: 6, ...cardShadow }}>
+                  <Icon name="edit" size={13} color={t.dark} />
+                  <T size={12} weight="600">New chat</T>
+                </Row>
+              </Pressable>
+            ) : null
+          }
+        />
+        <Row style={{ backgroundColor: t.card, borderRadius: radius.pill, paddingLeft: space.l, padding: 6, gap: 6, ...cardShadow }}>
+          <TextInput
+            placeholder="Message your health memory…"
+            placeholderTextColor={t.faint}
+            selectionColor={t.accentDark}
+            value={q}
+            onChangeText={setQ}
+            onSubmitEditing={() => run(q)}
+            returnKeyType="send"
+            style={{ flex: 1, color: t.text, fontSize: 15, fontFamily: fontFamily('400'), paddingVertical: 10 }}
+          />
+          <Pressable
+            accessibilityLabel="Ask by voice"
+            onPress={() => toast('Voice questions arrive with on-device Whisper (roadmap)', 'warn')}
+            style={({ pressed }) => ({ width: 44, height: 44, borderRadius: 22, backgroundColor: t.surfaceAlt, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.7 : 1 })}>
+            <Icon name="mic" size={19} color={t.dark} />
+          </Pressable>
+          <Pressable
+            accessibilityLabel="Send"
+            disabled={!canSend}
+            onPress={() => run(q)}
+            style={({ pressed }) => ({ width: 44, height: 44, borderRadius: 22, backgroundColor: canSend || busy ? t.dark : t.mist, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.8 : 1 })}>
+            {busy ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Icon name="arrow-up" size={20} color={canSend ? '#FFFFFF' : t.faint} />}
+          </Pressable>
+        </Row>
+      </View>
+    </KeyboardAvoidingView>
   );
 }

@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Animated,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,10 +17,15 @@ import {
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
+// React Native's own KeyboardAvoidingView doesn't track the keyboard on Android once edge-to-edge display is
+// on (the default here) — it relies on a window-resize signal edge-to-edge turns off. This library's version
+// reads the keyboard's inset/animation directly, and needs the app root wrapped in its KeyboardProvider
+// (see app/_layout.tsx). Same props (`behavior`, `keyboardVerticalOffset`), so it's a drop-in swap.
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { fontFamily, type Weight } from './fonts';
-import { cardShadow, glow, radius, raisedShadow, space, useTheme } from './theme';
+import { cardShadow, radius, raisedShadow, space, useTheme } from './theme';
 
 export type IconName = ComponentProps<typeof Feather>['name'];
 
@@ -114,20 +120,60 @@ export function SectionTitle({ children, right, icon }: { children: ReactNode; r
 
 // ---------- layout ----------
 
-/** A screen: cream background, safe area, optional scroll. Headers already handle the top inset (use `top` when there is none). */
-export function Screen({ children, scroll = true, padded = true, refreshing, top }: { children: ReactNode; scroll?: boolean; padded?: boolean; refreshing?: boolean; top?: boolean }) {
+/**
+ * Expo's edge-to-edge display on Android (on by default) turns off `windowSoftInputMode=adjustResize`, so
+ * Android needs `KeyboardAvoidingView` for the keyboard to not cover focused inputs — same as iOS, just with
+ * a different `behavior` ('padding' fights the safe-area inset on iOS; 'height' is the one that behaves there).
+ */
+const KEYBOARD_BEHAVIOR = Platform.OS === 'ios' ? 'padding' : 'height';
+/**
+ * Without this, the library computes the view's screen position from its `onLayout` y (relative to its
+ * *immediate parent* only) — correct here since Screen/Sheet sit at y=0 within theirs, but fragile: any
+ * screen nested differently (e.g. below a header, inside a scroll parent) silently gets the wrong offset and
+ * the keyboard just doesn't avoid at all. `automaticOffset` asks the OS for the view's true screen position
+ * instead, so it's on everywhere rather than relying on each screen happening to sit at a lucky offset.
+ */
+const KEYBOARD_AVOID_PROPS = { behavior: KEYBOARD_BEHAVIOR, automaticOffset: true } as const;
+
+const hexToRgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+
+/**
+ * The onboarding's soft peach-to-cream wash. There is no gradient package in the dev build, so it is stacked
+ * bands. `to` defaults to the canvas colour so the wash dissolves into the screen; pass '#FFFFFF' over white.
+ */
+export function PeachWash({ height = 300, to }: { height?: number; to?: string }) {
+  const t = useTheme();
+  const bands = 28;
+  const a = hexToRgb(t.wash);
+  const b = hexToRgb(to ?? t.bg);
+  return (
+    <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, height }}>
+      {Array.from({ length: bands }, (_, i) => {
+        const k = (i / (bands - 1)) ** 1.4;
+        const rgb = a.map((c, j) => Math.round(c + (b[j] - c) * k));
+        return <View key={i} style={{ flex: 1, backgroundColor: `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` }} />;
+      })}
+    </View>
+  );
+}
+
+/** A screen: canvas background with the peach wash behind the top (or near-black with `dark`), safe area, optional scroll. Headers already handle the top inset (use `top` when there is none). */
+export function Screen({ children, scroll = true, padded = true, refreshing, top, dark }: { children: ReactNode; scroll?: boolean; padded?: boolean; refreshing?: boolean; top?: boolean; dark?: boolean }) {
   const t = useTheme();
   const body = padded ? { padding: space.l, gap: space.m } : undefined;
   return (
-    <SafeAreaView edges={top ? ['top', 'left', 'right'] : ['left', 'right']} style={[styles.flex, { backgroundColor: t.bg }]}>
-      {scroll ? (
-        <ScrollView contentContainerStyle={[body, { paddingBottom: space.xxl }]} keyboardShouldPersistTaps="handled">
-          {refreshing ? <ActivityIndicator style={{ marginBottom: space.s }} color={t.accentDark} /> : null}
-          {children}
-        </ScrollView>
-      ) : (
-        <View style={[styles.flex, body]}>{children}</View>
-      )}
+    <SafeAreaView edges={top ? ['top', 'left', 'right'] : ['left', 'right']} style={[styles.flex, { backgroundColor: dark ? t.dark : t.bg }]}>
+      {dark ? null : <PeachWash />}
+      <KeyboardAvoidingView style={styles.flex} {...KEYBOARD_AVOID_PROPS}>
+        {scroll ? (
+          <ScrollView contentContainerStyle={[body, { paddingBottom: space.xxl }]} keyboardShouldPersistTaps="handled">
+            {refreshing ? <ActivityIndicator style={{ marginBottom: space.s }} color={dark ? '#FFFFFF' : t.accentDark} /> : null}
+            {children}
+          </ScrollView>
+        ) : (
+          <View style={[styles.flex, body]}>{children}</View>
+        )}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -185,8 +231,8 @@ export function Divider() {
 // ---------- controls ----------
 
 /**
- * primary = the lime call to action (filled, glow). soft = the outlined secondary. danger = filled red.
- * ghost = text-only link in the darker lime. Labels are uppercase and widely tracked.
+ * primary = the near-black pill call to action. soft = the white outlined secondary. danger = filled red.
+ * ghost = text-only link.
  */
 export function Button({ title, onPress, kind = 'primary', disabled, busy, small }: {
   title: string;
@@ -198,8 +244,7 @@ export function Button({ title, onPress, kind = 'primary', disabled, busy, small
 }) {
   const t = useTheme();
   const c = {
-    primary: { bg: t.primary, fg: t.dark, border: 'transparent', size: 15, py: 17, px: 24, weight: '700' as Weight },
-    soft: { bg: t.card, fg: t.dark, border: t.border, size: 14, py: 15, px: 22, weight: '600' as Weight },
+    primary: { bg: t.dark, fg: '#FFFFFF', border: 'transparent', size: 15, py: 17, px: 24, weight: '600' as Weight },    soft: { bg: t.card, fg: t.dark, border: t.border, size: 14, py: 15, px: 22, weight: '600' as Weight },
     danger: { bg: t.bad, fg: '#FFFFFF', border: 'transparent', size: 15, py: 17, px: 24, weight: '600' as Weight },
     ghost: { bg: 'transparent', fg: t.link, border: 'transparent', size: 14, py: 12, px: 12, weight: '600' as Weight },
   }[kind];
@@ -218,7 +263,7 @@ export function Button({ title, onPress, kind = 'primary', disabled, busy, small
         onPressOut={pressOut}
         style={({ pressed }) => [
           { backgroundColor: c.bg, borderColor: c.border, borderWidth: c.border === 'transparent' ? 0 : 1, borderRadius: kind === 'ghost' ? 0 : radius.pill, paddingVertical: py, paddingHorizontal: px, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 },
-          kind === 'primary' && !disabled && glow,
+          kind === 'primary' && { ...raisedShadow, shadowColor: t.primary },
           (disabled || busy) && { opacity: 0.4 },
           pressed && { opacity: 0.75 },
         ]}>
@@ -232,7 +277,7 @@ export function Button({ title, onPress, kind = 'primary', disabled, busy, small
 /** A pill. `small` is the mono badge style. `icon` draws a small glyph before the label. */
 export function Chip({ label, selected, onPress, tone = 'soft', small, icon }: { label: string; selected?: boolean; onPress?: () => void; tone?: 'soft' | 'good' | 'warn' | 'bad'; small?: boolean; icon?: IconName }) {
   const t = useTheme();
-  const tones = { soft: { bg: t.primarySoft, fg: t.dark, bd: t.border }, good: { bg: t.goodSoft, fg: t.good, bd: 'transparent' }, warn: { bg: t.warnSoft, fg: t.warn, bd: 'transparent' }, bad: { bg: t.badSoft, fg: t.bad, bd: 'transparent' } }[tone];
+  const tones = { soft: { bg: t.surfaceAlt, fg: t.dark, bd: 'transparent' }, good: { bg: t.goodSoft, fg: t.good, bd: 'transparent' }, warn: { bg: t.warnSoft, fg: t.warn, bd: 'transparent' }, bad: { bg: t.badSoft, fg: t.bad, bd: 'transparent' } }[tone];
   const fg = selected ? t.dark : tones.fg;
   const style = {
     backgroundColor: selected ? t.primary : tones.bg,
@@ -329,21 +374,24 @@ export function Empty({ title, hint, icon = 'inbox' }: { title: string; hint?: s
   );
 }
 
-/** A bottom sheet with the centred drag handle. Tapping outside closes it. */
+/** A bottom sheet with the centred drag handle. Tapping outside closes it. A `Modal` is its own root view, so
+ *  it needs its own `KeyboardAvoidingView` — the screen behind it avoiding the keyboard doesn't cover this. */
 export function Sheet({ visible, title, onClose, children }: { visible: boolean; title: string; onClose: () => void; children: ReactNode }) {
   const t = useTheme();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={{ flex: 1, backgroundColor: t.overlay, justifyContent: 'flex-end' }} onPress={onClose}>
-        <Pressable style={{ backgroundColor: t.bg, maxHeight: '88%', padding: space.l, paddingTop: space.m, gap: space.m, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl }} onPress={() => undefined}>
-          <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: t.borderStrong }} />
-          <Row style={{ justifyContent: 'space-between' }}>
-            <View style={{ flex: 1 }}><H2>{title}</H2></View>
-            <Pressable onPress={onClose} hitSlop={12} style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.card, alignItems: 'center', justifyContent: 'center' }}><Icon name="x" size={18} color={t.dark} /></Pressable>
-          </Row>
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: space.s, paddingBottom: space.l }}>{children}</ScrollView>
+      <KeyboardAvoidingView style={{ flex: 1 }} {...KEYBOARD_AVOID_PROPS}>
+        <Pressable style={{ flex: 1, backgroundColor: t.overlay, justifyContent: 'flex-end' }} onPress={onClose}>
+          <Pressable style={{ backgroundColor: t.bg, maxHeight: '88%', padding: space.l, paddingTop: space.m, gap: space.m, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl }} onPress={() => undefined}>
+            <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: t.borderStrong }} />
+            <Row style={{ justifyContent: 'space-between' }}>
+              <View style={{ flex: 1 }}><H2>{title}</H2></View>
+              <Pressable onPress={onClose} hitSlop={12} style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.card, alignItems: 'center', justifyContent: 'center' }}><Icon name="x" size={18} color={t.dark} /></Pressable>
+            </Row>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: space.s, paddingBottom: space.l }}>{children}</ScrollView>
+          </Pressable>
         </Pressable>
-      </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

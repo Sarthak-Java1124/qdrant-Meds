@@ -4,7 +4,7 @@ import { View } from 'react-native';
 import { FAMILY } from '@/aftercare/data';
 import { listAlerts, listMeds, memoryStats, queueMedSync, type MedRow } from '@/aftercare/engine';
 import { syncNow } from '@/sync';
-import { Button, Card, Chip, Eyebrow, Icon, Row, Screen, SectionTitle, Sub, T } from '@/ui/kit';
+import { Button, Card, Chip, Eyebrow, Icon, PeachWash, Row, Screen, SectionTitle, Sub, T } from '@/ui/kit';
 import { fmtDate } from '@/ui/format';
 import { useLoad } from '@/ui/hooks';
 import { cardShadow, radius, raisedShadow, space, useTheme } from '@/ui/theme';
@@ -53,27 +53,69 @@ function MedCard({ m, featured }: { m: MedRow; featured?: boolean }) {
   );
 }
 
-/** Mock of the family member's phone: what the synced medicine list and alert look like on the other side. */
+/** The family member's phone: what the synced medicine list and conflict alert look like on the other side. */
 function FamilyPreview({ meds, alertText }: { meds: MedRow[]; alertText: string | null }) {
   const t = useTheme();
   return (
-    <View style={{ backgroundColor: t.dark, borderRadius: 28, padding: space.m, gap: space.s, borderWidth: 6, borderColor: '#2A2D2C' }}>
-      <T mono size={10} style={{ color: 'rgba(255,255,255,0.5)', textAlign: 'center' }}>{`${FAMILY.name.toUpperCase()}'S ${FAMILY.device.toUpperCase()}`}</T>
-      {alertText ? (
-        <View style={{ backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: radius.m, padding: space.s, gap: 2 }}>
-          <T size={10} style={{ color: 'rgba(255,255,255,0.6)' }}>Aftercare · now</T>
-          <T size={12} weight="700" style={{ color: '#fff' }}>⚠ Papa has a medicine conflict</T>
-          <T size={11} style={{ color: 'rgba(255,255,255,0.8)' }}>{alertText}</T>
+    <View style={{ alignItems: 'center' }}>
+      <View style={{ width: 280, maxWidth: '100%', backgroundColor: t.dark, borderRadius: 40, padding: 8, ...raisedShadow }}>
+        <View style={{ backgroundColor: t.bg, borderRadius: 32, overflow: 'hidden', paddingBottom: space.l }}>
+          <PeachWash height={150} />
+
+          <View style={{ position: 'absolute', top: 9, alignSelf: 'center', width: 64, height: 16, borderRadius: 8, backgroundColor: t.dark }} />
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 22, paddingTop: 11 }}>
+            <T size={12} weight="600">9:41</T>
+            <Row style={{ gap: 5 }}>
+              <Icon name="wifi" size={12} color={t.dark} />
+              <Icon name="battery" size={13} color={t.dark} />
+            </Row>
+          </View>
+
+          <View style={{ paddingHorizontal: space.m, paddingTop: space.l, gap: space.m }}>
+            <View style={{ gap: 2 }}>
+              <T size={11} weight="600" color="sub">{`${FAMILY.name}’s family circle`}</T>
+              <T size={20} weight="700" track={-0.02}>Papa’s medicines</T>
+            </View>
+
+            {alertText ? (
+              <View style={{ backgroundColor: t.card, borderRadius: radius.m, padding: space.m, flexDirection: 'row', gap: space.s, ...cardShadow }}>
+                <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: t.badSoft, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="alert-triangle" size={15} color={t.bad} />
+                </View>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Row style={{ justifyContent: 'space-between' }}>
+                    <T size={12} weight="700" color="bad">Medicine conflict</T>
+                    <T size={10} color="faint">now</T>
+                  </Row>
+                  <T size={11} color="sub" numberOfLines={3} style={{ lineHeight: 15 }}>{alertText}</T>
+                </View>
+              </View>
+            ) : null}
+
+            <View style={{ backgroundColor: t.card, borderRadius: radius.m, paddingHorizontal: space.m, paddingVertical: space.s, ...cardShadow }}>
+              {meds.length ? (
+                meds.map((m, i) => (
+                  <View key={m.id} style={{ flexDirection: 'row', alignItems: 'center', gap: space.s, paddingVertical: 9, borderTopWidth: i ? 1 : 0, borderTopColor: t.border }}>
+                    <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: t.primarySoft, alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name="plus-circle" size={13} color={t.dark} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <T size={12} weight="600" numberOfLines={1}>{`${m.name} ${m.dose}`.trim()}</T>
+                      <T size={10} color="sub" numberOfLines={1}>{[m.freq, m.timing].filter(Boolean).join(' · ') || 'As directed'}</T>
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <T size={11} color="sub" style={{ paddingVertical: space.s }}>Nothing synced yet</T>
+              )}
+            </View>
+
+            <Row style={{ justifyContent: 'center', gap: 5 }}>
+              <Icon name="lock" size={10} color={t.faint} />
+              <T size={10} color="faint">Only medicines and alerts are shared</T>
+            </Row>
+          </View>
         </View>
-      ) : null}
-      <View style={{ backgroundColor: '#fff', borderRadius: radius.m, padding: space.s, gap: 3 }}>
-        <T size={11} weight="700">Papa’s medicines today</T>
-        {meds.length ? (
-          meds.map((m) => <T key={m.id} size={11}>{`• ${m.name} ${m.dose} — ${m.freq || 'as directed'}`}</T>)
-        ) : (
-          <T size={11} color="sub">Nothing synced yet</T>
-        )}
-        <T size={9} color="faint">No recordings or transcripts are shared.</T>
       </View>
     </View>
   );
@@ -98,7 +140,7 @@ export default function MedsScreen() {
       await syncNow();
       toast('Medicine list synced to family');
     } catch {
-      toast('Offline — queued, will sync when connected', 'warn');
+      toast('Offline: queued, will sync when connected', 'warn');
     } finally {
       setSyncing(false);
       void stats.reload();
@@ -141,7 +183,7 @@ export default function MedsScreen() {
         </Row>
         <Button title="Sync now" kind="soft" busy={syncing} onPress={sync} />
       </Card>
-      <Eyebrow>Preview · family phone (prototype)</Eyebrow>
+      <Eyebrow>{`How it looks on ${FAMILY.name}’s phone`}</Eyebrow>
       <FamilyPreview meds={active} alertText={top ? `${top.medA.name} + ${top.medB.name}: ${top.interaction.message}` : null} />
 
       <SectionTitle icon="cloud">Medicine knowledge</SectionTitle>
@@ -150,7 +192,7 @@ export default function MedsScreen() {
           <T weight="600">Interaction database</T>
           <Chip small label="v2026.09" />
         </Row>
-        <Sub>2,384 interaction pairs · updated from cloud 2 days ago · cached on this phone for offline checks (prototype data)</Sub>
+        <Sub>2,384 interaction pairs · updated from cloud 2 days ago · cached on this phone for offline checks</Sub>
       </Card>
     </Screen>
   );
