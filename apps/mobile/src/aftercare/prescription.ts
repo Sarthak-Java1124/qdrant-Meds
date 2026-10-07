@@ -361,3 +361,112 @@ export function groupRows(boxes: OcrBox[]): string[] {
   }
   return rows.map((r) => r.sort((a, b) => a.x - b.x).map((b) => b.text.trim()).join(' '));
 }
+
+// ---------- tidying the instruction lines ----------
+
+export type NoteKind = 'test' | 'follow_up' | 'diet' | 'lifestyle' | 'warning' | 'hospital' | 'other';
+
+export interface Note {
+  text: string;
+  kind: NoteKind;
+  /** The line has a word the app does not recognise, so it may be misread: show it with a "check" marker. */
+  check: boolean;
+}
+
+export const NOTE_LABEL: Record<NoteKind, string> = {
+  test: 'Tests to get done',
+  follow_up: 'Follow-up',
+  diet: 'Diet',
+  lifestyle: 'Lifestyle',
+  warning: 'Warning signs',
+  hospital: 'Hospital care',
+  other: 'Other notes',
+};
+/** The order the groups are shown in. */
+export const NOTE_ORDER: NoteKind[] = ['test', 'hospital', 'follow_up', 'diet', 'lifestyle', 'warning', 'other'];
+
+/** Words that appear in test and instruction lines. A misread word within a letter or two of one of these is corrected. */
+const TERMS = [
+  'stool', 'occult', 'blood', 'film', 'count', 'transfusion', 'admission', 'profile', 'iron', 'lipid', 'thyroid', 'urine', 'culture', 'routine', 'fasting',
+  'creatinine', 'kidney', 'liver', 'function', 'haemoglobin', 'hemoglobin', 'platelet', 'reticulocyte', 'echo', 'ultrasound', 'abdomen', 'xray', 'angiography',
+  'troponin', 'electrophoresis', 'review', 'follow', 'repeat', 'avoid', 'salt', 'walk', 'exercise', 'emergency', 'sugar', 'water', 'weeks', 'months', 'days',
+  'spep', 'band', 'protein', 'cholesterol', 'glucose', 'sodium', 'potassium', 'urea', 'uric', 'acid', 'sample', 'after', 'before', 'diet', 'rest', 'test', 'scan', 'sample', 'report', 'chest', 'pain', 'breathlessness', 'physiotherapy', 'consult', 'calcium', 'vitamin',
+];
+const TERM_SET = new Set(TERMS);
+/** Everyday words that may sit in an instruction line. Any other word of four or more letters makes a line "check". */
+const COMMON = new Set(['after', 'afternoon', 'again', 'alcohol', 'also', 'another', 'appetite', 'apply', 'back', 'bath', 'bed', 'bedtime', 'before', 'blood', 'bone', 'bones', 'brain', 'bread', 'breakfast', 'breath', 'breathing', 'butter', 'call', 'came', 'can', 'capsule', 'capsules', 'carefully', 'check', 'climb', 'climbing', 'clinic', 'coffee', 'cold', 'come', 'completely', 'compress', 'continue', 'control', 'cough', 'course', 'cream', 'daily', 'day', 'dinner', 'dizziness', 'dizzy', 'doctor', 'done', 'dose', 'doses', 'drink', 'drinks', 'drops', 'during', 'early', 'empty', 'enough', 'evening', 'every', 'fatigue', 'feel', 'feeling', 'felt', 'fever', 'floor', 'food', 'friday', 'fried', 'from', 'fruit', 'fruits', 'fully', 'gain', 'ghee', 'give', 'go', 'heart', 'heavy', 'high', 'home', 'hospital', 'hot', 'hour', 'hours', 'immediately', 'increase', 'injection', 'itching', 'joint', 'joints', 'juice', 'keep', 'kidney', 'last', 'late', 'less', 'level', 'levels', 'lift', 'lifting', 'light', 'limit', 'little', 'liver', 'loss', 'lots', 'low', 'lunch', 'lung', 'lungs', 'lying', 'many', 'meals', 'milk', 'minute', 'minutes', 'monday', 'month', 'months', 'more', 'morning', 'much', 'muscle', 'must', 'nausea', 'need', 'needs', 'next', 'night', 'noon', 'normal', 'nurse', 'oil', 'oily', 'ointment', 'once', 'other', 'pain', 'pains', 'papad', 'phone', 'pickles', 'please', 'plenty', 'pressure', 'properly', 'rash', 'reduce', 'regularly', 'report', 'reports', 'result', 'results', 'rice', 'salt', 'salty', 'saturday', 'should', 'sitting', 'sleep', 'sleeping', 'slowly', 'smoking', 'soda', 'some', 'soon', 'spicy', 'stairs', 'standing', 'start', 'stomach', 'stop', 'strictly', 'sugar', 'sunday', 'sweet', 'sweets', 'swelling', 'syrup', 'tablet', 'tablets', 'take', 'taking', 'tea', 'tests', 'than', 'that', 'then', 'this', 'thursday', 'time', 'times', 'timing', 'tired', 'tobacco', 'today', 'tomorrow', 'tonight', 'totally', 'tuesday', 'twice', 'urgent', 'urgently', 'vegetables', 'visit', 'vomiting', 'warm', 'water', 'weakness', 'wednesday', 'week', 'weeks', 'weight', 'went', 'what', 'wheat', 'when', 'where', 'which', 'while', 'will', 'with', 'year', 'years', 'yesterday', 'your']);
+
+/** Fixes a word the OCR got a letter or two wrong ("occutt" → "occult", "Shol" → "Stool"), when it clearly resembles a known term. */
+function fixWord(word: string) {
+  const lower = word.toLowerCase();
+  if (lower.length < 4 || TERM_SET.has(lower)) return word;
+  let best: string | undefined;
+  let bestDistance = 3;
+  for (const term of TERMS) {
+    if (term[0] !== lower[0] || Math.abs(term.length - lower.length) > 2) continue;
+    const limit = term.length >= 5 ? 2 : 1;
+    const dist = editDistance(lower, term);
+    if (dist <= limit && dist < bestDistance) {
+      best = term;
+      bestDistance = dist;
+    }
+  }
+  if (!best) return word;
+  return word[0] === word[0].toUpperCase() ? best[0].toUpperCase() + best.slice(1) : best;
+}
+
+const KINDS: [NoteKind, RegExp][] = [
+  ['warning', /\b(?:emergency|chest pain|breathless\w*|call me|go to the|if you (?:feel|get|have)|if the \w+ (?:increases|gets worse|persists))\b/i],
+  ['follow_up', /\b(?:review|follow[\s-]?up|come back|next visit|revisit|after \d+\s*(?:day|week|month)s?)\b/i],
+  ['hospital', /\b(?:admission|admit(?:ted)?|transfusion|iv fluids?|drip)\b/i],
+  ['test', /\b(?:tests?|profile|film|count|x-?ray|ecg|ekg|echo|2d\s?echo|scan|ct|mri|ultrasound|usg|culture|abg|trop(?:onin)?|kft|lft|rft|cbc|hba1c|tsh|inr|pt|stool|urine|spep|biopsy|holter|tmt|angiography|blood sugar|fasting|ppbs|fbs|rbs|creatinine|sample|report)\b/i],
+  ['diet', /\b(?:avoid|salt|diet|eat|food|drink|water|fluids?|rice|sweets?|sugar|oil\w*|spicy|pickles?)\b/i],
+  ['lifestyle', /\b(?:walk|exercise|yoga|physio\w*|rest|sleep|weight|smok\w*|alcohol)\b/i],
+];
+
+/** "Stool for occult Blood" → "Stool for occult blood"; acronyms (SPEP, ECG) and single letters keep their capitals. */
+function sentenceCase(line: string) {
+  const out = line.split(' ').map((w) => (/^[A-Z0-9]{2,}$/.test(w) || w.length === 1 || /\d/.test(w) ? w : w.toLowerCase()));
+  out[0] = out[0][0].toUpperCase() + out[0].slice(1);
+  return out.join(' ');
+}
+
+const DURATION_ONLY = /^[x×+]?\s*(\d{1,3})\s*(days?|weeks?|months?)\.?$/i;
+/** Printed form words that sometimes end up in front of a line ("-Diagnosis - Blood film"). */
+const LEADING_LABEL = /^(?:diagnosis|follow\s*up|advice|investigations?|rx|c\/o)\b[\s:.\-]*/i;
+
+/**
+ * Cleans up the instruction lines read from a prescription so they can be shown to a person:
+ * strips bullets and form labels, corrects misread medical words, joins a stray "× 3 days" to the line above it,
+ * groups lines by what they are, and sets aside lines that are not recognisable as an instruction, which are most
+ * likely misread handwriting. Those go to `unclear` and are not saved unless the user keeps them.
+ */
+export function tidyNotes(raw: string[]): { notes: Note[]; unclear: string[] } {
+  const lines: string[] = [];
+  for (const r of raw) {
+    let t = r.replace(/[•·]/g, ' ').replace(/^[\s\-+*.,:;]+|[\s\-+,:;.]+$/g, '').replace(/\s+/g, ' ');
+    t = t.replace(LEADING_LABEL, '').replace(/^[\s\-+*.,:;]+/, '').trim();
+    if (!t) continue;
+    const dur = DURATION_ONLY.exec(t);
+    if (dur && lines.length) {
+      lines[lines.length - 1] += ` × ${dur[1]} ${dur[2].toLowerCase().replace(/s$/, '')}${dur[1] === '1' ? '' : 's'}`;
+      continue;
+    }
+    lines.push(t);
+  }
+
+  const notes: Note[] = [];
+  const unclear: string[] = [];
+  const seen = new Set<string>();
+  for (const line of lines) {
+    const fixed = line.replace(/[A-Za-z]{4,}/g, fixWord);
+    const key = fixed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const kind = KINDS.find(([, re]) => re.test(fixed))?.[0];
+    const check = (fixed.match(/[A-Za-z]{4,}/g) ?? []).some((w) => !TERM_SET.has(w.toLowerCase()) && !COMMON.has(w.toLowerCase()));
+    if (kind) notes.push({ text: sentenceCase(fixed), kind, check });
+    else unclear.push(line);
+  }
+  return { notes, unclear };
+}

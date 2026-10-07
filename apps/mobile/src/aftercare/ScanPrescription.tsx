@@ -8,7 +8,7 @@ import { radius, space, useTheme } from '@/ui/theme';
 import { toast } from '@/ui/toast';
 
 import { ocrSupported, readPrescription, type Photo } from './ocr';
-import { parsePrescription, type ParsedPrescription, type RxMedicine } from './prescription';
+import { NOTE_LABEL, NOTE_ORDER, parsePrescription, tidyNotes, type Note, type ParsedPrescription, type RxMedicine } from './prescription';
 
 /** What the user confirmed after checking the scan. */
 export interface ConfirmedPrescription {
@@ -108,9 +108,11 @@ export function ScanPrescription({ busy, onConfirm }: { busy: boolean; onConfirm
   const [parsed, setParsed] = useState<ParsedPrescription | null>(null);
   const [doctor, setDoctor] = useState({ name: '', specialty: '', clinic: '' });
   const [meds, setMeds] = useState<RxMedicine[]>([]);
-  const [notes, setNotes] = useState<string[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [unclear, setUnclear] = useState<string[]>([]);
+  const [showUnclear, setShowUnclear] = useState(false);
+  const [editDoctor, setEditDoctor] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
-  const [showNotes, setShowNotes] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [useToday, setUseToday] = useState(false);
   const [now, setNow] = useState(0);
@@ -132,9 +134,12 @@ export function ScanPrescription({ busy, onConfirm }: { busy: boolean; onConfirm
       setParsed(result);
       setDoctor({ name: result.header.doctor, specialty: result.header.specialty, clinic: result.header.clinic });
       setMeds(result.medicines);
-      setNotes(result.notes);
+      const tidy = tidyNotes(result.notes);
+      setNotes(tidy.notes);
+      setUnclear(tidy.unclear);
+      setShowUnclear(false);
+      setEditDoctor(!result.header.doctor);
       setOpen(null);
-      setShowNotes(result.quality.poor); // a poor read: show what would be saved
       setShowRaw(false);
       setUseToday(false);
       setNow(Date.now());
@@ -212,7 +217,7 @@ export function ScanPrescription({ busy, onConfirm }: { busy: boolean; onConfirm
       clinic: doctor.clinic.trim(),
       ts: visitTs,
       meds: usable,
-      notes,
+      notes: notes.map((n) => `${n.text}.`),
     });
 
   return (
@@ -220,21 +225,37 @@ export function ScanPrescription({ busy, onConfirm }: { busy: boolean; onConfirm
       {parsed.quality.poor ? <Notice text="This photo was hard to read. Check every line against the paper, or retake it in better light." /> : null}
       {unrecognised ? <Notice text={`${unrecognised} ${unrecognised === 1 ? 'medicine was' : 'medicines were'} not recognised. Check the name${unrecognised === 1 ? '' : 's'} against the paper.`} /> : null}
 
-      <View style={{ gap: space.s }}>
-        <Field label="Doctor" placeholder="Dr. …" value={doctor.name} onChangeText={(name) => setDoctor((d) => ({ ...d, name }))} />
-        <Field label="Speciality" placeholder="e.g. Cardiologist" value={doctor.specialty} onChangeText={(specialty) => setDoctor((d) => ({ ...d, specialty }))} />
-        <Field label="Clinic / hospital" placeholder="e.g. Apollo Clinic" value={doctor.clinic} onChangeText={(clinic) => setDoctor((d) => ({ ...d, clinic }))} />
+      <View style={{ backgroundColor: t.input, borderRadius: radius.m, padding: space.m, gap: space.s }}>
         <Row style={{ justifyContent: 'space-between', gap: space.s }}>
-          <Sub style={{ flex: 1 }}>{paperDate && !useToday ? `Dated ${longDate(paperDate)}` : paperDate ? `Using today's date (the paper says ${longDate(paperDate)})` : 'No date found on the prescription, so today is used.'}</Sub>
+          <View style={{ flex: 1 }}>
+            <T weight="700" size={15}>{doctor.name || 'Doctor not found'}</T>
+            <T size={12} color="sub">{[doctor.specialty, doctor.clinic].filter(Boolean).join(' · ') || 'Add speciality and clinic'}</T>
+          </View>
+          <Chip small label={editDoctor ? 'Done' : 'Edit'} onPress={() => setEditDoctor((v) => !v)} />
+        </Row>
+        {editDoctor ? (
+          <View style={{ gap: space.s }}>
+            <Field label="Doctor" placeholder="Dr. …" value={doctor.name} onChangeText={(name) => setDoctor((d) => ({ ...d, name }))} />
+            <Field label="Speciality" placeholder="e.g. Cardiologist" value={doctor.specialty} onChangeText={(specialty) => setDoctor((d) => ({ ...d, specialty }))} />
+            <Field label="Clinic / hospital" placeholder="e.g. Apollo Clinic" value={doctor.clinic} onChangeText={(clinic) => setDoctor((d) => ({ ...d, clinic }))} />
+          </View>
+        ) : null}
+        <Row style={{ justifyContent: 'space-between', gap: space.s }}>
+          <T size={12} color="sub" style={{ flex: 1 }}>{paperDate && !useToday ? `Dated ${longDate(paperDate)}` : paperDate ? `Using today's date (the paper says ${longDate(paperDate)})` : 'No date on the paper, so today is used'}</T>
           {paperDate ? <Chip small label={useToday ? 'Use paper date' : 'Use today'} onPress={() => setUseToday((v) => !v)} /> : null}
         </Row>
-        {finished ? <Notice text={`${finished} ${finished === 1 ? 'course on this prescription has' : 'courses on this prescription have'} already finished by this date, so ${finished === 1 ? 'it' : 'they'} will be saved as completed. If the date is wrong, use today's date.`} /> : null}
       </View>
+      {finished ? <Notice text={`${finished} ${finished === 1 ? 'course on this prescription has' : 'courses on this prescription have'} already finished by this date, so ${finished === 1 ? 'it' : 'they'} will be saved as completed. If the date is wrong, use today's date.`} /> : null}
 
       <Row style={{ justifyContent: 'space-between' }}>
         <Eyebrow>Medicines</Eyebrow>
         <Chip small tone={usable.length ? 'good' : 'soft'} label={`${usable.length} ${usable.length === 1 ? 'medicine' : 'medicines'}`} />
       </Row>
+      {!meds.length ? (
+        <View style={{ backgroundColor: t.input, borderRadius: radius.m, padding: space.m }}>
+          <T size={13} color="sub">{parsed.quality.poor ? 'No medicines could be read from this photo. Add them by hand if the prescription has any.' : 'No medicines found on this prescription.'}</T>
+        </View>
+      ) : null}
       <View style={{ gap: space.s }}>
         {meds.map((m, i) => (
           <MedicineCard
@@ -252,23 +273,53 @@ export function ScanPrescription({ busy, onConfirm }: { busy: boolean; onConfirm
       </View>
       <Button
         title="Add a medicine"
-        kind="ghost"
+        kind={meds.length ? 'ghost' : 'soft'}
         onPress={() => {
           setMeds((all) => [...all, emptyMedicine()]);
           setOpen(meds.length);
         }}
       />
 
-      {notes.length ? (
+      {NOTE_ORDER.map((kind) => {
+        const items = notes.map((n, index) => ({ n, index })).filter(({ n }) => n.kind === kind);
+        if (!items.length) return null;
+        return (
+          <View key={kind} style={{ gap: space.s }}>
+            <Eyebrow>{NOTE_LABEL[kind]}</Eyebrow>
+            <View style={{ backgroundColor: t.input, borderRadius: radius.m, paddingHorizontal: space.m, paddingVertical: space.s, gap: space.s }}>
+              {items.map(({ n, index }) => (
+                <Row key={`${index}-${n.text}`} style={{ justifyContent: 'space-between', gap: space.s }}>
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.s, flexWrap: 'wrap' }}>
+                    <T size={13}>{n.text}</T>
+                    {n.check ? <Chip small tone="warn" label="Check" /> : null}
+                  </View>
+                  <Pressable hitSlop={10} onPress={() => setNotes((all) => all.filter((_, j) => j !== index))}>
+                    <Icon name="x" size={16} color={t.faint} />
+                  </Pressable>
+                </Row>
+              ))}
+            </View>
+          </View>
+        );
+      })}
+
+      {unclear.length ? (
         <View style={{ gap: space.s }}>
-          <Pressable onPress={() => setShowNotes((v) => !v)}>
-            <Sub>{`Also noted ${notes.length} ${notes.length === 1 ? 'instruction' : 'instructions'}, such as diet, tests and follow-ups. ${showNotes ? 'Hide' : 'Review'}`}</Sub>
+          <Pressable onPress={() => setShowUnclear((v) => !v)}>
+            <Sub>{`${unclear.length} ${unclear.length === 1 ? 'line' : 'lines'} could not be read clearly and ${unclear.length === 1 ? 'was' : 'were'} left out. ${showUnclear ? 'Hide' : 'Review'}`}</Sub>
           </Pressable>
-          {showNotes
-            ? notes.map((n, i) => (
-                <Row key={`${i}-${n}`} style={{ justifyContent: 'space-between', gap: space.s }}>
-                  <T size={12} style={{ flex: 1 }}>{n}</T>
-                  <Chip small label="Remove" onPress={() => setNotes((all) => all.filter((_, j) => j !== i))} />
+          {showUnclear
+            ? unclear.map((line, i) => (
+                <Row key={`${i}-${line}`} style={{ justifyContent: 'space-between', gap: space.s }}>
+                  <T size={12} color="sub" style={{ flex: 1 }}>{line}</T>
+                  <Chip
+                    small
+                    label="Keep"
+                    onPress={() => {
+                      setNotes((all) => [...all, { text: line, kind: 'other', check: true }]);
+                      setUnclear((all) => all.filter((_, j) => j !== i));
+                    }}
+                  />
                 </Row>
               ))
             : null}

@@ -5,7 +5,7 @@ import { app, loadTs, mock } from './_load.mjs';
 for (const m of ['@/core/embedder', '@/core/embedQueue', '@/core/groups', '@/core/ingest', '@/core/search', '@/core/shards', '@/privacy']) mock(m, {});
 mock('@/ui/format', { fmtDate: (ts) => new Date(ts).toDateString() });
 
-const { groupRows, parsePrescription, medicineSentence } = loadTs(app('aftercare/prescription.ts'));
+const { groupRows, parsePrescription, medicineSentence, tidyNotes } = loadTs(app('aftercare/prescription.ts'));
 
 let failed = 0;
 const check = (name, ok, detail = '') => {
@@ -101,6 +101,19 @@ check('H: no medicine is invented from handwriting noise', H.medicines.length ==
 check('H: a poor read is flagged', H.quality.poor);
 check('H: vitals, footer and address lines are not kept as instructions', !H.notes.some((n) => /BP|SPO2|MEDICOLEGAL|ASHOK|Timing|\d{10}/i.test(n)), H.notes.join(' | '));
 check('H: no lone fragments kept', H.notes.every((n) => n.split(' ').length >= 2), H.notes.join(' | '));
+
+// ---- tidy instruction lines: the raw lines from the real sheet ----
+const T = tidyNotes(['27-1240 N SR + R BAB. +LPHB', 'Admission Blood Transfusion', 'Shol for occutt Blood', '+ 3 days', '-Diagnosis - Blood film', 'Meti Court .', 'SPEP for M Band']);
+const texts = T.notes.map((n) => n.text);
+check('tidy: misread words are corrected and a stray "+ 3 days" joins the line above', texts.includes('Stool for occult blood × 3 days'), texts.join(' | '));
+check('tidy: bullets, trailing dots and the "Diagnosis" form label are stripped', texts.includes('Blood film') && texts.every((x) => !/^[-+•.]|[.]$|diagnosis/i.test(x)), texts.join(' | '));
+check('tidy: casing is normalised, acronyms kept', texts.includes('SPEP for M band') && texts.includes('Admission blood transfusion'), texts.join(' | '));
+check('tidy: lines are grouped by what they are', T.notes.find((n) => n.text === 'Admission blood transfusion')?.kind === 'hospital' && T.notes.find((n) => n.text === 'Blood film')?.kind === 'test');
+check('tidy: a line the app cannot understand is set aside, not saved', T.unclear.length === 1 && T.unclear[0].startsWith('27-1240'), JSON.stringify(T.unclear));
+check('tidy: a line with an unknown word is kept but marked "check"', T.notes.find((n) => /^Meti/.test(n.text))?.check === true && T.notes.find((n) => n.text === 'SPEP for M band')?.check === false);
+const D2 = tidyNotes(['Avoid salt and pickles', 'Review after 2 weeks', 'Walk 30 minutes daily', 'If you feel chest pain go to the emergency', 'Get ECG and lipid profile done', 'Avoid salt and pickles']);
+check('tidy: diet, follow-up, lifestyle, warning and test lines land in their groups, duplicates removed', D2.notes.map((n) => n.kind).join() === 'diet,follow_up,lifestyle,warning,test' && D2.unclear.length === 0, D2.notes.map((n) => `${n.kind}:${n.text}`).join(' | '));
+check('tidy: clear typed instructions are not marked "check"', D2.notes.every((n) => !n.check), D2.notes.filter((n) => n.check).map((n) => n.text).join(' | '));
 
 // ---- stored sentences ----
 check('sentence: full medicine', medicineSentence({ name: 'Amlodipine', dose: '5 mg', freq: 'once daily', timing: 'after food', durationDays: 5, action: 'start' }) === 'Take Amlodipine 5 mg once daily after food for 5 days.');
