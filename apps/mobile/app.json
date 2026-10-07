@@ -8,7 +8,8 @@
     "scheme": "lastmeter",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.lastmeter.rider"
     },
     "android": {
       "adaptiveIcon": {
@@ -23,7 +24,8 @@
         "android.permission.READ_CONTACTS",
         "android.permission.CAMERA",
         "android.permission.INTERNET",
-        "android.permission.ACCESS_NETWORK_STATE"
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -49,6 +51,13 @@
         "expo-image-picker",
         {
           "cameraPermission": "LastMeter uses the camera to attach an optional photo to a delivery note. Photos stay on this phone."
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Aftercare listens to your doctor visit so it can write it down. The audio is transcribed on this phone and is never uploaded.",
+          "speechRecognitionPermission": "Aftercare uses speech recognition to turn your doctor visit into text on this phone."
         }
       ]
     ],
