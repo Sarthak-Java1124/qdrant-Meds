@@ -70,7 +70,15 @@
           "recordAudioAndroid": false
         }
       ],
-      "./plugins/withVisionOcr.js"
+      "./plugins/withVisionOcr.js",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "enableSceneSupport": true
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

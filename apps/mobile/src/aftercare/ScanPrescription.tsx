@@ -1,6 +1,7 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as Device from 'expo-device';
 import * as ImagePicker from 'expo-image-picker';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, View } from 'react-native';
 
 import { Button, Chip, Eyebrow, Field, Icon, Row, Sub, T } from '@/ui/kit';
@@ -101,7 +102,8 @@ export function ScanPrescription({ busy, onConfirm }: { busy: boolean; onConfirm
   const t = useTheme();
   const camera = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
-  const [hasCamera, setHasCamera] = useState<boolean | null>(null);
+  // simulators have no camera; `CameraView.isAvailableAsync` only exists on web, so ask the device instead
+  const hasCamera = Device.isDevice;
   const [ready, setReady] = useState(false);
   const [phase, setPhase] = useState<Phase>('capture');
   const [raw, setRaw] = useState<string[]>([]);
@@ -116,14 +118,6 @@ export function ScanPrescription({ busy, onConfirm }: { busy: boolean; onConfirm
   const [showRaw, setShowRaw] = useState(false);
   const [useToday, setUseToday] = useState(false);
   const [now, setNow] = useState(0);
-
-  useEffect(() => {
-    let live = true;
-    CameraView.isAvailableAsync().then((ok) => live && setHasCamera(ok), () => live && setHasCamera(false));
-    return () => {
-      live = false;
-    };
-  }, []);
 
   const read = async (photo: Photo) => {
     setPhase('reading');
