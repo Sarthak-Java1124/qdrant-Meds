@@ -50,7 +50,8 @@
       [
         "expo-image-picker",
         {
-          "cameraPermission": "LastMeter uses the camera to attach an optional photo to a delivery note. Photos stay on this phone."
+          "photosPermission": "Aftercare reads prescriptions from photos you choose. The photo is read on this phone and is not stored or uploaded.",
+          "cameraPermission": "Aftercare uses the camera to photograph a prescription. The photo is read on this phone and is not stored or uploaded."
         }
       ],
       [
@@ -59,7 +60,17 @@
           "microphonePermission": "Aftercare listens to your doctor visit so it can write it down. The audio is transcribed on this phone and is never uploaded.",
           "speechRecognitionPermission": "Aftercare uses speech recognition to turn your doctor visit into text on this phone."
         }
-      ]
+      ],
+      "expo-mlkit-ocr",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Aftercare uses the camera to photograph a prescription. The photo is read on this phone and is not stored or uploaded.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      "./plugins/withVisionOcr.js"
     ],
     "experiments": {
       "typedRoutes": true,

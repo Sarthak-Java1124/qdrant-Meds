@@ -6,7 +6,7 @@ Aftercare is an offline-first, privacy-first medical memory for patients and the
 
 The only data that ever leaves the device is the medicine list and alerts, which are shared with a family member. That data first passes an on-device Leak Check and is logged in a hash-chained, auditable receipt ledger.
 
-> **Status:** hackathon prototype. Recording a visit is real (the phone's own speech recognizer, on-device where the phone supports it). Prescription scanning, the family member's device and the drug-interaction table are simulated. The on-device model, the Qdrant Edge memory and hybrid search, the medicine reconciliation and the alerts are real. See [Limitations](#limitations).
+> **Status:** hackathon prototype. Recording a visit (the phone's own speech recognizer) and scanning a prescription (on-device OCR) are real. The family member's device and the drug-interaction table are simulated. The on-device model, the Qdrant Edge memory and hybrid search, the medicine reconciliation and the alerts are real. See [Limitations](#limitations).
 
 ---
 
@@ -326,9 +326,9 @@ A full scripted walkthrough, including talking points and recovery steps, is in 
 This is a prototype built for a hackathon. Known gaps:
 
 - **Speech-to-text uses the phone's own recognizer** (`expo-speech-recognition`), on-device when the phone supports it, otherwise the OS speech service may be used (the app says so). There is no voice-based speaker separation. Instead, clear first-person patient statements ("I feel dizzy", "my knee hurts", "thank you") are set aside by wording into a *Left out* list that can be put back; one-word replies ("Yes", "Okay", "Haan"), addressing the doctor ("Hi, Dr."), short "how long" answers and clear symptom reports are set aside too. Symptom fragments with no first person ("Dizzy in the morning", "Only at night") cannot be told from the doctor's words and stay in the transcript, which can be corrected before saving. Only the text is kept; the audio is discarded.
-- **Scan prescription is simulated:** it still uses the scripted demo visits in `aftercare/data.ts`.
-- **The drug and interaction tables are small and hand-written** (15 drugs, 8 interactions). They are illustrative, not clinical data, and must not be used for medical decisions.
-- **Prescription extraction is rule-based** (regular expressions over the drug alias table). Only sentence classification uses the embedding model.
+- **Scan prescription reads the photo on the phone** (Apple Vision on iPhone, Google ML Kit on Android; verified on the iOS simulator only so far, not yet on a real phone or Android). It reads printed prescriptions and neat handwriting well, and **messy handwriting poorly**: the app flags a hard-to-read photo and every medicine can be corrected before saving. A medicine whose name is not in the drug list is kept as "Check name", never dropped. The drug list is about 150 common generics and Indian brands assembled by hand for recognition only, not clinical data, and should be reviewed by a pharmacist. The interaction table is still only 8 pairs, so most newly recognised drugs are not checked for clashes. The photo is deleted after reading.
+- **The drug and interaction tables are hand-written** (156 drugs, 8 interactions). They are illustrative, not clinical data, and must not be used for medical decisions.
+- **Prescription and sentence extraction is rule-based** (regular expressions and typo-tolerant matching over the drug alias table). Only sentence classification uses the embedding model.
 - **The family member's device is simulated in the UI.** The medicine list goes through the real outbox and sync path, but it reuses the `place_fact` wire format inherited from LastMeter.
 - **Voice questions** are not implemented yet.
 - **iOS** is configured but has not been verified on device. Android is the primary target.

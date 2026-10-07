@@ -24,6 +24,8 @@ export interface VisitInput {
   ts: number;
   source: VisitSource;
   transcript: string;
+  /** Medicines already read and confirmed by the user (a scanned prescription). Saved as given, so one whose name isn't in the drug list is still kept. */
+  meds?: { med: MedMention; sentence: string }[];
 }
 
 export interface MedMention {
@@ -142,7 +144,7 @@ async function classify(text: string): Promise<Category> {
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-const FREQ: [RegExp, string][] = [
+export const FREQ: [RegExp, string][] = [
   [/three times|thrice/, 'three times a day'],
   [/twice|two times/, 'twice daily'],
   [/once (?:a day|daily)|every day|daily/, 'once daily'],
@@ -150,7 +152,7 @@ const FREQ: [RegExp, string][] = [
   [/when needed|if (?:the )?pain|\bsos\b/, 'when needed'],
 ];
 
-const TIMING: [RegExp, string][] = [
+export const TIMING: [RegExp, string][] = [
   [/after breakfast/, 'after breakfast'],
   [/before breakfast|empty stomach/, 'before breakfast'],
   [/after (?:food|meals?)/, 'after food'],
@@ -159,11 +161,16 @@ const TIMING: [RegExp, string][] = [
   [/after dinner/, 'after dinner'],
 ];
 
-const WORD_NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, ten: 10, fourteen: 14 };
+export const WORD_NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, fourteen: 14, fifteen: 15, twenty: 20, thirty: 30 };
+
+// Aliases are matched as whole words (longest first), so "telma" is not found inside another word.
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const ALIASES = new Map(DRUGS.flatMap((d) => d.aliases.map((a) => [a, d] as const)));
+const ALIAS_RE = new RegExp(`\\b(?:${[...ALIASES.keys()].sort((a, b) => b.length - a.length).map(escapeRe).join('|')})\\b`);
 
 export function findDrug(text: string) {
-  const t = text.toLowerCase();
-  return DRUGS.find((d) => d.aliases.some((a) => t.includes(a)));
+  const m = ALIAS_RE.exec(text.toLowerCase());
+  return m ? ALIASES.get(m[0]) : undefined;
 }
 
 /** Pulls a structured prescription out of one sentence: drug, dose, how often, when, for how long, and what changed. */
@@ -305,10 +312,13 @@ export async function saveVisit(v: VisitInput, onStage?: (s: Stage, detail?: str
     facts.push({ category, speaker: s.speaker, text: s.text, ...(med ? { med } : {}) });
     onStage?.('understanding', `${i + 1}/${sentences.length}`);
   }
+  const given: VisitFact[] = (v.meds ?? []).map(({ med, sentence }) => ({ category: 'medicine', speaker: 'Doctor', text: sentence, med }));
+  facts.unshift(...given);
+  const transcript = [...given.map((f) => f.text), v.transcript].filter(Boolean).join('\n');
 
   await db.runAsync(
     'INSERT OR REPLACE INTO visits (id, doctor, specialty, clinic, ts, source, transcript, facts) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [v.id, v.doctor, v.specialty, v.clinic, v.ts, v.source, v.transcript, JSON.stringify(facts)],
+    [v.id, v.doctor, v.specialty, v.clinic, v.ts, v.source, transcript, JSON.stringify(facts)],
   );
 
   onStage?.('indexing');

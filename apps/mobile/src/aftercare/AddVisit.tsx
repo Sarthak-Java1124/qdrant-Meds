@@ -1,13 +1,15 @@
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 
 import { Button, Chip, Eyebrow, Field, Icon, Row, Sheet, Sub, T } from '@/ui/kit';
 import { radius, space, useTheme } from '@/ui/theme';
 import { toast } from '@/ui/toast';
 
-import { DEMO_VISITS, DOCTORS, DRUGS, visitTs, type DemoVisit, type DoctorProfile } from './data';
-import { extractMed, findDrug, saveVisit, splitDoctorLines, splitTranscript, visitExists, type SaveSummary, type Stage, type VisitInput, type VisitSource } from './engine';
+import { DOCTORS, DRUGS, type DoctorProfile } from './data';
+import { medicineSentence } from './prescription';
+import { ScanPrescription, type ConfirmedPrescription } from './ScanPrescription';
+import { extractMed, findDrug, saveVisit, splitDoctorLines, splitTranscript, visitExists, type SaveSummary, type Stage, type VisitInput } from './engine';
 
 export type AddMode = 'record' | 'scan' | 'type' | null;
 
@@ -292,136 +294,6 @@ function Recorder({ onStop, onEdit }: { onStop: (transcript: string) => void; on
   );
 }
 
-/** The recognised text of a demo prescription: the doctor's lines, without the speaker label. */
-const prescriptionLines = (demo: DemoVisit) =>
-  demo.transcript
-    .split('\n')
-    .filter((l) => l.startsWith('Doctor:'))
-    .map((l) => l.replace('Doctor: ', ''));
-
-/** Four peach corner brackets, the universal "line it up in here" camera cue. */
-function Brackets() {
-  const t = useTheme();
-  const c = { position: 'absolute' as const, width: 34, height: 34, borderColor: t.primary, borderWidth: 4 };
-  return (
-    <>
-      <View style={[c, { top: 16, left: 16, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 12 }]} />
-      <View style={[c, { top: 16, right: 16, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 12 }]} />
-      <View style={[c, { bottom: 16, left: 16, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 12 }]} />
-      <View style={[c, { bottom: 16, right: 16, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 12 }]} />
-    </>
-  );
-}
-
-/** Step 1 of scanning: a camera viewfinder with a paper in frame. Capturing is simulated. */
-function ScanFrame({ onCapture, onSample }: { onCapture: () => void; onSample: () => void }) {
-  const t = useTheme();
-  const bar = (w: string, h = 7) => <View style={{ width: w as `${number}%`, height: h, borderRadius: 3, backgroundColor: 'rgba(43,18,8,0.14)' }} />;
-  return (
-    <View style={{ gap: space.m }}>
-      <View style={{ height: 250, borderRadius: radius.l, backgroundColor: t.dark, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-        <View style={{ width: '58%', height: '76%', backgroundColor: '#FFFDF6', borderRadius: 6, padding: space.m, gap: 9, transform: [{ rotate: '-2deg' }] }}>
-          {bar('55%', 9)}
-          {bar('38%')}
-          <View style={{ height: 1, backgroundColor: t.border, marginVertical: 2 }} />
-          {bar('90%')}
-          {bar('78%')}
-          {bar('84%')}
-          {bar('60%')}
-          {bar('72%')}
-        </View>
-        <Brackets />
-      </View>
-      <Sub style={{ textAlign: 'center' }}>Fit the whole prescription inside the frame, in good light, then capture.</Sub>
-      <Button title="Capture photo" onPress={onCapture} />
-      <Button title="Use another sample prescription" kind="ghost" onPress={onSample} />
-    </View>
-  );
-}
-
-/** Step 2: the captured prescription with a scan line sweeping over it while its lines are read one by one. */
-function Scanner({ demo, onDone }: { demo: DemoVisit; onDone: () => void }) {
-  const t = useTheme();
-  const lines = prescriptionLines(demo);
-  const [shown, setShown] = useState(0);
-  const [h, setH] = useState(0);
-  const sweep = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const loop = Animated.loop(Animated.sequence([
-      Animated.timing(sweep, { toValue: 1, duration: 1300, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-      Animated.timing(sweep, { toValue: 0, duration: 1300, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-    ]));
-    loop.start();
-    return () => loop.stop();
-  }, [sweep]);
-
-  useEffect(() => {
-    if (shown >= lines.length) {
-      const id = setTimeout(onDone, 350);
-      return () => clearTimeout(id);
-    }
-    const id = setTimeout(() => setShown((s) => s + 1), 320);
-    return () => clearTimeout(id);
-  }, [shown, lines.length, onDone]);
-
-  return (
-    <View style={{ gap: space.s }}>
-      <View onLayout={(e) => setH(e.nativeEvent.layout.height)} style={{ backgroundColor: '#FFFDF6', borderRadius: radius.m, borderWidth: 1, borderColor: t.borderStrong, padding: space.m, gap: 4, overflow: 'hidden' }}>
-        <T weight="700" size={13}>{demo.doctor}</T>
-        <T size={10} color="sub">{`${demo.specialty} · ${demo.clinic}`}</T>
-        <View style={{ height: 1, backgroundColor: t.border, marginVertical: 4 }} />
-        <T serif italic size={18}>Rx</T>
-        {lines.map((l, i) => (
-          <T key={i} size={11} style={{ color: i < shown ? t.text : t.faint, backgroundColor: i === shown ? t.primarySoft : 'transparent' }}>{`${i + 1}. ${l}`}</T>
-        ))}
-        <Animated.View
-          pointerEvents="none"
-          style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 3, backgroundColor: t.primary, opacity: 0.9, transform: [{ translateY: sweep.interpolate({ inputRange: [0, 1], outputRange: [0, Math.max(0, h - 3)] }) }] }}
-        />
-      </View>
-      <Sub style={{ textAlign: 'center' }}>{`Reading line ${Math.min(shown + 1, lines.length)} of ${lines.length}…`}</Sub>
-    </View>
-  );
-}
-
-const ACTION_LABEL = { start: 'New', change: 'Changed', stop: 'Stopped', continue: 'Continue' } as const;
-
-/** Step 3: what the scan found, in plain terms, so the user can check it before it goes into memory. */
-function ScanReview({ demo, onRetake }: { demo: DemoVisit; onRetake: () => void }) {
-  const t = useTheme();
-  const lines = prescriptionLines(demo);
-  const meds = lines.map((l) => extractMed(l)).filter((m): m is NonNullable<typeof m> => !!m);
-  const notes = lines.filter((l) => !extractMed(l)).length;
-  return (
-    <View style={{ gap: space.m }}>
-      <Row style={{ justifyContent: 'space-between' }}>
-        <View style={{ flex: 1 }}>
-          <T weight="700" size={15}>{demo.doctor}</T>
-          <T size={12} color="sub">{`${demo.specialty} · ${demo.clinic}`}</T>
-        </View>
-        <Chip small tone="good" label={`${meds.length} ${meds.length === 1 ? 'medicine' : 'medicines'}`} />
-      </Row>
-      <View style={{ gap: space.s }}>
-        {meds.map((m, i) => (
-          <View key={i} style={{ backgroundColor: t.input, borderRadius: radius.m, padding: space.m, flexDirection: 'row', alignItems: 'center', gap: space.m }}>
-            <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: t.primarySoft, alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="plus-circle" size={18} color={t.dark} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <T weight="700" size={14}>{[m.name, m.dose].filter(Boolean).join(' ')}</T>
-              <T size={12} color="sub">{[m.freq, m.timing, m.durationDays ? `for ${m.durationDays} days` : ''].filter(Boolean).join(' · ') || 'As directed'}</T>
-            </View>
-            <Chip small label={ACTION_LABEL[m.action]} tone={m.action === 'stop' ? 'bad' : 'soft'} />
-          </View>
-        ))}
-      </View>
-      {notes ? <Sub>{`Also noted ${notes} ${notes === 1 ? 'instruction' : 'instructions'} such as diet, tests and follow-ups.`}</Sub> : null}
-      <Button title="Retake photo" kind="ghost" onPress={onRetake} />
-    </View>
-  );
-}
-
 function Progress({ stage, detail }: { stage: Stage | null; detail?: string }) {
   const t = useTheme();
   const idx = stage ? (stage === 'done' ? STAGES.length : STAGES.findIndex((s) => s.key === stage)) : -1;
@@ -438,14 +310,12 @@ function Progress({ stage, detail }: { stage: Stage | null; detail?: string }) {
 }
 
 export function AddVisitSheet({ mode, onClose, onSaved }: { mode: AddMode; onClose: () => void; onSaved: (s: SaveSummary, doctor: string) => void }) {
-  const [demo, setDemo] = useState<DemoVisit>(DEMO_VISITS[0]);
   const [captured, setCaptured] = useState(false);
   const [recorded, setRecorded] = useState('');
   const [running, setRunning] = useState(false);
   const [stage, setStage] = useState<Stage | null>(null);
   const [detail, setDetail] = useState<string>();
   const [step, setStep] = useState<'details' | 'capture'>('details');
-  const [scanStep, setScanStep] = useState<'frame' | 'reading' | 'review'>('frame');
   const [query, setQuery] = useState('');
   const [profile, setProfile] = useState<DoctorProfile | null>(null);
   const [manual, setManual] = useState({ specialty: '', clinic: '' });
@@ -457,54 +327,25 @@ export function AddVisitSheet({ mode, onClose, onSaved }: { mode: AddMode; onClo
     setRecorded('');
     setRunning(false);
     setStage(null);
-  }, [mode, demo.id, step]);
+  }, [mode, step]);
 
   useEffect(() => {
     if (mode) {
       setStep('details');
-      setScanStep('frame');
       setQuery('');
       setProfile(null);
       setManual({ specialty: '', clinic: '' });
       setReason('');
-      setDemo(DEMO_VISITS[0]);
     }
-  }, [mode]);
-
-  // Scanning a prescription (still simulated) picks the next demo visit that isn't in memory yet.
-  useEffect(() => {
-    if (mode !== 'scan') return;
-    let live = true;
-    (async () => {
-      const suffix = 'prescription';
-      const ids = DEMO_VISITS.map((d) => d.id);
-      let pick = ids[ids.length - 1];
-      for (const id of ids) {
-        if (!(await visitExists(`${id}-${suffix}`))) {
-          pick = id;
-          break;
-        }
-      }
-      if (live) setDemo(DEMO_VISITS.find((d) => d.id === pick)!);
-    })();
-    return () => {
-      live = false;
-    };
   }, [mode]);
 
   const recordDoctor: VisitDoctor = profile
     ? { name: profile.name, specialty: profile.specialty, clinic: profile.clinic }
     : { name: query.trim(), specialty: manual.specialty.trim() || 'General', clinic: manual.clinic.trim() };
 
-  const save = async () => {
-    const source: VisitSource = mode === 'record' ? 'recording' : mode === 'scan' ? 'prescription' : 'typed';
-    const v: VisitInput =
-      mode === 'type'
-        ? { id: `v-${Date.now()}`, doctor: typed.doctor.trim() || 'Doctor', specialty: 'General', clinic: '', ts: Date.now(), source, transcript: typed.text }
-        : mode === 'record'
-          ? { id: `v-${Date.now()}`, doctor: recordDoctor.name, specialty: recordDoctor.specialty, clinic: recordDoctor.clinic, ts: Date.now(), source, transcript: (reason.trim() ? `Patient: I am here for ${reason.trim()}.\n` : '') + recorded }
-          : { id: `${demo.id}-${source}`, doctor: demo.doctor, specialty: demo.specialty, clinic: demo.clinic, ts: visitTs(demo.daysAgo), source, transcript: demo.transcript };
-    if (!v.transcript.trim()) return toast('Nothing to save yet', 'warn');
+  /** Saves a visit through the on-device pipeline and shows its progress. */
+  const commit = async (v: VisitInput) => {
+    if (!v.transcript.trim() && !v.meds?.length) return toast('Nothing to save yet', 'warn');
     if (await visitExists(v.id)) return toast('That visit is already in your memory', 'warn');
     setRunning(true);
     try {
@@ -520,10 +361,29 @@ export function AddVisitSheet({ mode, onClose, onSaved }: { mode: AddMode; onClo
     }
   };
 
+  const save = () =>
+    commit(
+      mode === 'type'
+        ? { id: `v-${Date.now()}`, doctor: typed.doctor.trim() || 'Doctor', specialty: 'General', clinic: '', ts: Date.now(), source: 'typed', transcript: typed.text }
+        : { id: `v-${Date.now()}`, doctor: recordDoctor.name, specialty: recordDoctor.specialty, clinic: recordDoctor.clinic, ts: Date.now(), source: 'recording', transcript: (reason.trim() ? `Patient: I am here for ${reason.trim()}.\n` : '') + recorded },
+    );
+
+  /** The scanned medicines go in as the user confirmed them; the other instructions go through as sentences. */
+  const saveScan = (c: ConfirmedPrescription) =>
+    commit({
+      id: `v-${Date.now()}`,
+      doctor: c.doctor,
+      specialty: c.specialty,
+      clinic: c.clinic,
+      ts: c.ts,
+      source: 'prescription',
+      transcript: c.notes.join('\n'),
+      meds: c.meds.map((m) => ({ med: m, sentence: medicineSentence(m) })),
+    });
+
   const detailsStep = mode === 'record' && step === 'details';
-  const scanTitle = { frame: 'Scan a prescription', reading: 'Reading your prescription', review: 'Check what we found' }[scanStep];
-  const title = mode === 'record' ? (detailsStep ? 'Who was the visit with?' : 'Recording') : mode === 'scan' ? scanTitle : 'Type or paste notes';
-  const showSave = !detailsStep && (mode !== 'scan' || scanStep === 'review');
+  const title = mode === 'record' ? (detailsStep ? 'Who was the visit with?' : 'Recording') : mode === 'scan' ? 'Scan a prescription' : 'Type or paste notes';
+  const showSave = !detailsStep && mode !== 'scan';
   return (
     <Sheet visible={!!mode} title={title} onClose={running ? () => undefined : onClose}>
       {detailsStep ? (
@@ -557,19 +417,7 @@ export function AddVisitSheet({ mode, onClose, onSaved }: { mode: AddMode; onClo
           />
         </>
       ) : mode === 'scan' ? (
-        <>
-          <MockBadge text="Prototype: the scan is simulated. Real build runs on-device OCR on the camera photo." />
-          {scanStep === 'frame' ? (
-            <ScanFrame
-              onCapture={() => setScanStep('reading')}
-              onSample={() => setDemo((d) => DEMO_VISITS[(DEMO_VISITS.findIndex((x) => x.id === d.id) + 1) % DEMO_VISITS.length])}
-            />
-          ) : scanStep === 'reading' ? (
-            <Scanner key={demo.id} demo={demo} onDone={() => { setCaptured(true); setScanStep('review'); }} />
-          ) : (
-            <ScanReview demo={demo} onRetake={() => { setCaptured(false); setScanStep('frame'); }} />
-          )}
-        </>
+        <ScanPrescription busy={running} onConfirm={saveScan} />
       ) : (
         <>
           <Field label="Doctor" placeholder="Dr. …" value={typed.doctor} onChangeText={(doctor) => setTyped((x) => ({ ...x, doctor }))} />
