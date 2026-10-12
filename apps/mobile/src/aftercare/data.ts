@@ -115,29 +115,7 @@ export const DOCTORS: DoctorProfile[] = [
 
 export const visitTs = (daysAgo: number) => Date.now() - daysAgo * DAY;
 
-export interface Drug {
-  name: string;
-  aliases: string[];
-  purpose: string;
-}
-
-export const DRUGS: Drug[] = [
-  { name: 'Aspirin', aliases: ['aspirin', 'ecosprin'], purpose: 'Heart protection' },
-  { name: 'Ibuprofen', aliases: ['ibuprofen', 'brufen', 'combiflam'], purpose: 'Pain relief' },
-  { name: 'Amlodipine', aliases: ['amlodipine', 'amlong'], purpose: 'Blood pressure' },
-  { name: 'Atorvastatin', aliases: ['atorvastatin', 'atorva'], purpose: 'Cholesterol' },
-  { name: 'Metformin', aliases: ['metformin', 'glycomet'], purpose: 'Blood sugar' },
-  { name: 'Pantoprazole', aliases: ['pantoprazole', 'pan 40', 'pantocid'], purpose: 'Acidity' },
-  { name: 'Paracetamol', aliases: ['paracetamol', 'dolo', 'crocin', 'calpol'], purpose: 'Fever / pain' },
-  { name: 'Warfarin', aliases: ['warfarin'], purpose: 'Blood thinner' },
-  { name: 'Clopidogrel', aliases: ['clopidogrel', 'clopilet'], purpose: 'Blood thinner' },
-  { name: 'Telmisartan', aliases: ['telmisartan', 'telma'], purpose: 'Blood pressure' },
-  { name: 'Losartan', aliases: ['losartan'], purpose: 'Blood pressure' },
-  { name: 'Omeprazole', aliases: ['omeprazole', 'omez'], purpose: 'Acidity' },
-  { name: 'Azithromycin', aliases: ['azithromycin', 'azithral'], purpose: 'Antibiotic' },
-  { name: 'Levothyroxine', aliases: ['levothyroxine', 'thyronorm', 'eltroxin'], purpose: 'Thyroid' },
-  { name: 'Cetirizine', aliases: ['cetirizine', 'cetzine'], purpose: 'Allergy' },
-];
+export { DRUGS, type Drug } from './drugs';
 
 export interface Interaction {
   a: string;
