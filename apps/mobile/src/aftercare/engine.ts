@@ -208,6 +208,67 @@ export function splitTranscript(transcript: string) {
   return out;
 }
 
+/** The doctor speaking in the first person ("I am starting…", "I will write the tests", "I want you to rest", "I have changed your tablet"). */
+const DOCTOR_FIRST_PERSON = new RegExp(
+  [
+    String.raw`\bI(?:'ll| will) (?:write|check|give|prescribe|increase|reduce|start|stop|change|add|order|refer|see|examine|repeat|continue|keep|send|note|explain|arrange|run|review)\b`,
+    String.raw`\bI am (?:starting|increasing|reducing|stopping|adding|changing|prescribing|giving)\b`,
+    String.raw`\bI(?: would|'d) (?:like you|like to (?:see|check|examine|start|change|increase|reduce|repeat)|suggest|advise|recommend)\b`,
+    String.raw`\bI (?:want|need) you\b|\bI (?:suggest|advise|recommend|prescribe|can see)\b|\bI'm going to (?:start|give|prescribe|check|change)\b`,
+    String.raw`\bI(?:'ve| have)? \w+ (?:your|you)\b`,
+    String.raw`\bmy (?:advice|suggestion|recommendation|opinion)\b`,
+  ].join('|'),
+  'gi',
+);
+
+/** A sentence that is only an acknowledgement or a non-answer ("Yes", "Okay", "Haan", "Theek hai", "Not really", "Sorry, what?"). */
+const ACKNOWLEDGEMENT =
+  /^(?:(?:yes|yeah|yep|yup|no|nope|ok|okay|hmm+|haan?|ji|nahi|nahin|achha|accha|acha|theek hai|right|sure|fine|alright|sorry|pardon|what|thanks|thank you|nothing else|nothing|not really|not much|a little|a bit|little bit|maybe|doctor|dr|sir|madam|ma'am)\b[\s,.!?]*)+$/i;
+
+// "sir" and "madam" are not used here: doctors address patients that way too
+const DOCTOR_WORDS = String.raw`(?:doctor|dr)`;
+const GREETING = String.raw`(?:(?:hi|hello|hey|yes|yeah|ok|okay|sure|alright|namaste|ji|good (?:morning|afternoon|evening)),?\s*)*`;
+/** Addressing the doctor ("Hi, Dr.", "Yes doctor", "Okay doctor, I will do that", "Is it serious doctor?"), but not "see a doctor". */
+function addressesDoctor(text: string) {
+  if (new RegExp(`^${GREETING}${DOCTOR_WORDS}\\b`, 'i').test(text)) return true;
+  const m = new RegExp(`\\b(?:(\\w+)\\s+)?${DOCTOR_WORDS}\\W*$`, 'i').exec(text);
+  return !!m && !/^(?:a|an|the|your|another|family|my|good)$/i.test(m[1] ?? '');
+}
+
+/** A short answer about how long or when ("Three days", "Since last week", "Yesterday evening"). */
+const TIME_ANSWER =
+  /^(?:(?:since|from|about|around|nearly|almost)\s+)?(?:(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|few|couple of|\d+)\s+(?:day|week|month|year|hour)s?(?:\s+ago)?|yesterday(?:\s+(?:morning|afternoon|evening|night))?|last\s+(?:week|month|year|night)|this\s+(?:morning|week))[\s.!?]*$|^since\s+(?:yesterday|last\s+\w+|morning|\w+day)[\s.!?]*$/i;
+
+/** Symptoms described as happening ("The pain gets worse at night", "It started a week ago"). "If the pain gets worse, call me" is the doctor's. */
+const SYMPTOM_REPORT =
+  /\b(?:pain|headache|cough|fever|swelling|burning|itching|dizziness|nausea|vomiting|weakness|cramps?|rash|bleeding)\s+(?:started|starts|keeps|gets worse|got worse|is worse|comes (?:every|daily|at|after|in the)|increases)\b|^it (?:started|began) (?:\d|a |an |one |two |three |few |after |when |since |yesterday|last )/i;
+const CONDITIONAL = /^(?:if|when|in case|once|unless|until)\b/i;
+
+/**
+ * True when a sentence is clearly the patient speaking: first-person statements ("I feel dizzy", "my knee hurts",
+ * "I am taking Aspirin"), thank-yous and one-word replies, addressing the doctor, short "how long" answers, and
+ * symptom reports. The speech recognizer gives words, not voices, so this goes by wording and only catches clear
+ * cases. Anything unclear stays with the doctor, which is the safe side; the review step can put lines back.
+ */
+export function soundsLikePatient(text: string) {
+  const t = text.replace(/[’‘]/g, "'").trim();
+  if (/\bthank(?:s| you)\b/i.test(t) || ACKNOWLEDGEMENT.test(t) || addressesDoctor(t) || TIME_ANSWER.test(t)) return true;
+  if (!CONDITIONAL.test(t) && SYMPTOM_REPORT.test(t)) return true;
+  const rest = t.replace(DOCTOR_FIRST_PERSON, ' ').replace(/\b(?:let|call|tell|show|give|ask|see) me\b/gi, ' ');
+  return /\b(?:I|I'm|I've|I'd|I'll|my|mine|myself|me)\b/i.test(rest);
+}
+
+/**
+ * Splits a recorded transcript into the doctor's sentences (one per line, unlabeled: saveVisit treats unlabeled
+ * lines as the doctor's) and the sentences set aside as the patient's, so the review step can show them and put any back.
+ */
+export function splitDoctorLines(transcript: string) {
+  const doctor: string[] = [];
+  const leftOut: string[] = [];
+  for (const s of splitTranscript(transcript)) (soundsLikePatient(s.text) ? leftOut : doctor).push(s.text);
+  return { doctor: doctor.join('\n'), leftOut };
+}
+
 // ---------- saving a visit ----------
 
 export type Stage = 'transcribing' | 'understanding' | 'indexing' | 'checking' | 'done';

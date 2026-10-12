@@ -1,3 +1,4 @@
+import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, View } from 'react-native';
 
@@ -5,8 +6,8 @@ import { Button, Chip, Eyebrow, Field, Icon, Row, Sheet, Sub, T } from '@/ui/kit
 import { radius, space, useTheme } from '@/ui/theme';
 import { toast } from '@/ui/toast';
 
-import { DEMO_VISITS, DOCTORS, visitTs, type DemoVisit, type DoctorProfile } from './data';
-import { extractMed, saveVisit, visitExists, type SaveSummary, type Stage, type VisitInput, type VisitSource } from './engine';
+import { DEMO_VISITS, DOCTORS, DRUGS, visitTs, type DemoVisit, type DoctorProfile } from './data';
+import { extractMed, findDrug, saveVisit, splitDoctorLines, splitTranscript, visitExists, type SaveSummary, type Stage, type VisitInput, type VisitSource } from './engine';
 
 export type AddMode = 'record' | 'scan' | 'type' | null;
 
@@ -107,37 +108,139 @@ function MockBadge({ text }: { text: string }) {
   );
 }
 
+const BAR_COUNT = 28;
+/** Speech-recognizer errors that just mean "nothing heard yet": the session ends and we start the next one. */
+const QUIET_ERRORS = new Set(['no-speech', 'speech-timeout', 'aborted']);
+/** Errors where trying again cannot help (no permission, no recognizer, no mic). The user can still type. */
+const FATAL_ERRORS = new Set(['not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported']);
+const DRUG_HINTS = DRUGS.flatMap((d) => [d.name, ...d.aliases]);
+
 /**
- * Mock: a live recording. Runs until the user taps Stop, like leaving the phone on record in the consultation.
- * The waveform and the timer are live; the transcript streams in word by word from a demo visit, standing in
- * for on-device Whisper. Whatever was transcribed by the time of Stop is what gets saved.
+ * A live recording. The phone's own speech recognizer (on-device when the phone supports it) turns the
+ * conversation into text as it is spoken. Audio is never stored or uploaded; only the text is kept. The
+ * recognizer is restarted whenever the OS ends a session on a pause, so a long consultation keeps going.
+ * After Stop the transcript becomes editable, so a misheard drug name can be fixed before it is saved.
  */
-function Recorder({ demo, onStop }: { demo: DemoVisit; onStop: (transcript: string) => void }) {
+function Recorder({ onStop, onEdit }: { onStop: (transcript: string) => void; onEdit: (transcript: string) => void }) {
   const t = useTheme();
-  const words = useRef(demo.transcript.split(/(s+)/)).current;
-  const [n, setN] = useState(0);
   const [secs, setSecs] = useState(0);
   const [stopped, setStopped] = useState(false);
-  const [bars, setBars] = useState<number[]>(Array(28).fill(6));
-  const speaking = n < words.length;
+  const [stopping, setStopping] = useState(false);
+  const [typeOnly, setTypeOnly] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [partial, setPartial] = useState('');
+  const [finals, setFinals] = useState<string[]>([]);
+  const [text, setText] = useState('');
+  const [leftOut, setLeftOut] = useState<string[]>([]);
+  const [bars, setBars] = useState<number[]>(Array(BAR_COUNT).fill(4));
+  const finalsRef = useRef<string[]>([]);
+  const stopRequested = useRef(false);
+  const finished = useRef(false);
+  const onDevice = useRef(true);
+  const [offline, setOffline] = useState(true);
+
+  const begin = () =>
+    ExpoSpeechRecognitionModule.start({
+      lang: 'en-IN',
+      interimResults: true,
+      continuous: true,
+      requiresOnDeviceRecognition: onDevice.current,
+      addsPunctuation: true,
+      contextualStrings: DRUG_HINTS,
+      volumeChangeEventOptions: { enabled: true, intervalMillis: 110 },
+    });
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!live) return;
+      if (!perm.granted) {
+        setProblem('Microphone or speech permission is off. Turn it on in Settings, or type what the doctor said below.');
+        setTypeOnly(true);
+        setStopped(true);
+        return;
+      }
+      onDevice.current = ExpoSpeechRecognitionModule.supportsOnDeviceRecognition();
+      setOffline(onDevice.current);
+      if (!onDevice.current) setProblem('This phone cannot transcribe offline, so the system speech service may be used for this recording.');
+      begin();
+    })();
+    return () => {
+      live = false;
+      stopRequested.current = true;
+      ExpoSpeechRecognitionModule.abort();
+    };
+  }, []);
 
   useEffect(() => {
     if (stopped) return;
-    const clock = setInterval(() => setSecs((x) => x + 1), 1000);
-    const b = setInterval(() => setBars((prev) => prev.map(() => (speaking ? 6 + Math.random() * 38 : 4 + Math.random() * 6))), 110);
-    const w = setInterval(() => setN((x) => Math.min(words.length, x + 1)), 130);
-    return () => {
-      clearInterval(clock);
-      clearInterval(b);
-      clearInterval(w);
-    };
-  }, [stopped, speaking, words.length]);
+    const id = setInterval(() => setSecs((x) => x + 1), 1000);
+    return () => clearInterval(id);
+  }, [stopped]);
 
-  const transcript = words.slice(0, n).join('').trim();
-  const stop = () => {
+  useSpeechRecognitionEvent('result', (e) => {
+    const heard = e.results[0]?.transcript?.trim() ?? '';
+    if (!e.isFinal) return setPartial(heard);
+    setPartial('');
+    if (heard) {
+      finalsRef.current = [...finalsRef.current, heard];
+      setFinals(finalsRef.current);
+    }
+  });
+
+  useSpeechRecognitionEvent('volumechange', (e) => {
+    const level = Math.min(1, Math.max(0, (e.value + 2) / 12));
+    setBars((prev) => [...prev.slice(1), 4 + level * 40]);
+  });
+
+  useSpeechRecognitionEvent('error', (e) => {
+    if (QUIET_ERRORS.has(e.error)) return;
+    if (FATAL_ERRORS.has(e.error)) {
+      stopRequested.current = true;
+      setProblem(`Could not listen (${e.error}). You can type what the doctor said below.`);
+      setTypeOnly(true);
+      setStopped(true);
+      return;
+    }
+    setProblem(`Speech recognizer: ${e.message || e.error}`);
+  });
+
+  useSpeechRecognitionEvent('end', () => {
+    if (finished.current) return;
+    if (!stopRequested.current) {
+      // the OS closes a session after a long pause; carry on listening
+      setTimeout(() => {
+        if (!stopRequested.current) begin();
+      }, 400);
+      return;
+    }
+    finished.current = true;
+    const { doctor, leftOut: aside } = splitDoctorLines(finalsRef.current.join('\n'));
+    setText(doctor);
+    setLeftOut(aside);
+    setPartial('');
     setStopped(true);
-    onStop(transcript);
+    onStop(doctor);
+  });
+
+  const stop = () => {
+    stopRequested.current = true;
+    setStopping(true);
+    ExpoSpeechRecognitionModule.stop();
   };
+
+  const edit = (v: string) => {
+    setText(v);
+    onEdit(v);
+  };
+
+  const putBack = (i: number) => {
+    edit(`${text}${text ? '\n' : ''}${leftOut[i]}`);
+    setLeftOut((rows) => rows.filter((_, j) => j !== i));
+  };
+  const live = finals.join(' ') + (partial ? ` ${partial}` : '');
+  const meds = stopped ? splitTranscript(text).filter((x) => x.speaker === 'Doctor' && extractMed(x.text)).length : 0;
 
   return (
     <View style={{ gap: space.s }}>
@@ -153,11 +256,38 @@ function Recorder({ demo, onStop }: { demo: DemoVisit; onStop: (transcript: stri
           <View key={i} style={{ flex: 1, height: stopped ? 4 : h, borderRadius: 2, backgroundColor: i % 3 === 0 ? t.dark : t.primary }} />
         ))}
       </View>
-      <Eyebrow>Live transcript · on-device</Eyebrow>
-      <View style={{ backgroundColor: t.input, borderRadius: radius.m, padding: space.m, maxHeight: 180 }}>
-        <T size={12} style={{ lineHeight: 18 }}>{transcript || 'Listening…'}</T>
-      </View>
-      {stopped ? null : <Button title="Stop recording" kind="soft" onPress={stop} />}
+      {problem ? <MockBadge text={problem} /> : null}
+      {stopped && (finals.length > 0 || typeOnly) ? (
+        <>
+          <Field label="Check the transcript. Fix any misheard medicine names." value={text} onChangeText={edit} multiline />
+          <Chip small tone={meds ? 'good' : 'soft'} label={`${meds} ${meds === 1 ? 'medicine' : 'medicines'} found`} />
+          {leftOut.length ? (
+            <View style={{ gap: space.s }}>
+              <Eyebrow>Left out · sounded like the patient</Eyebrow>
+              {leftOut.map((line, i) => {
+                const drug = findDrug(line);
+                return (
+                  <Row key={`${i}-${line}`} style={{ justifyContent: 'space-between', gap: space.s }}>
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <T size={12} color="sub">{line}</T>
+                      {drug ? <Chip small tone="warn" label={`mentions ${drug.name}`} /> : null}
+                    </View>
+                    <Chip small label="Put back" onPress={() => putBack(i)} />
+                  </Row>
+                );
+              })}
+            </View>
+          ) : null}
+        </>
+      ) : stopped ? null : (
+        <>
+          <Eyebrow>{`Live transcript · ${offline ? 'on-device' : 'system speech service'}`}</Eyebrow>
+          <View style={{ backgroundColor: t.input, borderRadius: radius.m, padding: space.m, maxHeight: 180 }}>
+            <T size={12} style={{ lineHeight: 18 }}>{live || 'Listening…'}</T>
+          </View>
+        </>
+      )}
+      {stopped ? null : <Button title={stopping ? 'Finishing…' : 'Stop recording'} kind="soft" disabled={stopping} onPress={stop} />}
     </View>
   );
 }
@@ -341,14 +471,13 @@ export function AddVisitSheet({ mode, onClose, onSaved }: { mode: AddMode; onClo
     }
   }, [mode]);
 
-  // Recording a doctor (or scanning a prescription) picks the next demo visit that isn't in memory yet
-  // (Mehta's first visit, then his follow-up).
+  // Scanning a prescription (still simulated) picks the next demo visit that isn't in memory yet.
   useEffect(() => {
-    if (mode !== 'record' && mode !== 'scan') return;
+    if (mode !== 'scan') return;
     let live = true;
     (async () => {
-      const suffix = mode === 'scan' ? 'prescription' : 'recording';
-      const ids = mode === 'record' && profile ? profile.demoIds : DEMO_VISITS.map((d) => d.id);
+      const suffix = 'prescription';
+      const ids = DEMO_VISITS.map((d) => d.id);
       let pick = ids[ids.length - 1];
       for (const id of ids) {
         if (!(await visitExists(`${id}-${suffix}`))) {
@@ -361,7 +490,7 @@ export function AddVisitSheet({ mode, onClose, onSaved }: { mode: AddMode; onClo
     return () => {
       live = false;
     };
-  }, [mode, profile]);
+  }, [mode]);
 
   const recordDoctor: VisitDoctor = profile
     ? { name: profile.name, specialty: profile.specialty, clinic: profile.clinic }
@@ -373,7 +502,7 @@ export function AddVisitSheet({ mode, onClose, onSaved }: { mode: AddMode; onClo
       mode === 'type'
         ? { id: `v-${Date.now()}`, doctor: typed.doctor.trim() || 'Doctor', specialty: 'General', clinic: '', ts: Date.now(), source, transcript: typed.text }
         : mode === 'record'
-          ? { id: `${demo.id}-${source}`, doctor: recordDoctor.name, specialty: recordDoctor.specialty, clinic: recordDoctor.clinic, ts: Date.now(), source, transcript: (reason.trim() ? `Patient: I am here for ${reason.trim()}.\n` : '') + recorded }
+          ? { id: `v-${Date.now()}`, doctor: recordDoctor.name, specialty: recordDoctor.specialty, clinic: recordDoctor.clinic, ts: Date.now(), source, transcript: (reason.trim() ? `Patient: I am here for ${reason.trim()}.\n` : '') + recorded }
           : { id: `${demo.id}-${source}`, doctor: demo.doctor, specialty: demo.specialty, clinic: demo.clinic, ts: visitTs(demo.daysAgo), source, transcript: demo.transcript };
     if (!v.transcript.trim()) return toast('Nothing to save yet', 'warn');
     if (await visitExists(v.id)) return toast('That visit is already in your memory', 'warn');
@@ -421,7 +550,11 @@ export function AddVisitSheet({ mode, onClose, onSaved }: { mode: AddMode; onClo
             {running ? null : <Chip small label="Change" onPress={() => setStep('details')} />}
           </Row>
           {reason.trim() ? <Sub>{`Reason: ${reason.trim()}`}</Sub> : null}
-          <Recorder key={`${demo.id}-${step}`} demo={demo} onStop={(text) => { setRecorded(text); setCaptured(true); }} />
+          <Recorder
+            key={step}
+            onStop={(text) => { setRecorded(text); setCaptured(!!text.trim()); }}
+            onEdit={(text) => { setRecorded(text); setCaptured(!!text.trim()); }}
+          />
         </>
       ) : mode === 'scan' ? (
         <>
